@@ -166,7 +166,7 @@ cat <<MON
     monitoring to your MAIN box: after binding, clevis itself proves the
     full path at every boot, and you can manually verify any time with:
 
-      curl -fsS http://<anchor-ip>/adv | jq -r .payload | ...  (from the MAIN box)
+      curl -fsS http://<anchor-ip>/adv    (200 + JSON = tang is answering; run from the MAIN box)
 MON
 echo
 cat <<UI
