@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh, and the OpenTofu version pinned in .opentofu-version (both via regex custom managers). Minor/patch bumps automerge once CI is green; MAJOR bumps always land as PRs for human review. Requires: (1) the Renovate GitHub App installed on this repo, (2) post-bootstrap, renovate[bot] on the main-ruleset bypass list (its commits are unsigned).",
+  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh, and the OpenTofu version pinned in .opentofu-version (both via regex custom managers). Minor/patch bumps automerge once CI is green; MAJOR bumps always land as PRs for human review. Requires the Renovate GitHub App installed on this repo. Note: hosted-app commits are unsigned (signing is self-hosted-only), but squash merges produce GitHub web-flow-signed commits on main, so required_signatures holds; if platformAutomerge ever trips on the signature check, add renovate[bot] to the main-ruleset bypass list.",
   "enabledManagers": ["github-actions", "custom.regex"],
   "customManagers": [
     {
