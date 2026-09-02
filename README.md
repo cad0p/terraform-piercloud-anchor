@@ -44,6 +44,33 @@ The module provisions **no SSH access** — inbound or outbound. You administer
 the anchor from the netcup SCP remote console, or by adding your own SSH key
 via netcup SCP at order time.
 
+## The flow, for a first-time user
+
+1. **Order the anchor** — in the netcup SCP: a small VPS ("piko" class is
+   plenty), any Debian-family image, root password set at order time. Note
+   the server name (or id), your SCP user id, and the anchor's IP.
+   *(docs/usage.md §1)*
+2. **Create SCP API credentials** (access + refresh token) in the SCP and
+   export them as `NETCUP_*` environment variables. *(docs/usage.md §2)*
+3. **`tofu apply`** the module — it adopts your server and configures the
+   firewall. Takes the variables shown in the Quickstart below.
+   *(docs/usage.md §3)*
+4. **Run ONE script on the anchor** — netcup SCP → your server → remote
+   console → log in as root → paste the `curl … | bash` line from the
+   Quickstart. It installs tang, prints the **thumbprint** (save it in your
+   password manager immediately), and installs the Gatus monitor.
+   *(docs/usage.md §4)*
+5. **Configure the monitor** — one file on the anchor:
+   `/etc/gatus/config.yaml`. Pick an alerting channel (ntfy / Telegram /
+   SMTP) and add endpoints for **your main server's services by DNS name**.
+   *(docs/usage.md §5)*
+6. **Bind your main box** — install `clevis clevis-luks clevis-initramfs`,
+   run the printed `clevis luks bind` command, confirm the thumbprint
+   matches, rebuild the initramfs. *(docs/usage.md §6)*
+7. **Reboot-test twice.** The unlock prompt may flash, then continue on its
+   own when clevis reaches the anchor. That is success. Keep the passphrase
+   keyslot forever — it is the true root. *(docs/usage.md §7)*
+
 ## Quickstart
 
 ```bash
