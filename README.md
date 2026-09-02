@@ -161,4 +161,7 @@ beyond what the README states. Please don't infer more.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The piercloud name and logo are not licensed: no endorsement by, or affiliation
+with, the piercloud project is implied by use of this module.
