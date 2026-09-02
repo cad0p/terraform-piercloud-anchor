@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  TOFU_VERSION: "1.12.2"
+
+jobs:
+  fmt:
+    name: tofu fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+      - name: tofu fmt -check -recursive
+        run: tofu fmt -check -recursive
+
+  validate:
+    name: tofu validate (cred-free)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+      - name: tofu init -backend=false
+        run: tofu init -backend=false
+      - name: tofu validate
+        run: tofu validate
+      - name: tofu init + validate (example)
+        working-directory: examples/quickstart
+        run: |
+          tofu init -backend=false
+          tofu validate
+
+  key-material-grep:
+    name: key-material grep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if private key material appears in tracked code files
+        run: |
+          set -euo pipefail
+          # Scan code files (never docs/README — they legitimately MENTION the
+          # paths and formats). We assert no private key MATERIAL is committed:
+          #   - JWK private field "d": in .tf/.sh/.hcl/.json files
+          #   - PEM private key headers in any code file
+          matches=0
+          # JWK private scalar "d": only flagged when followed by a long
+          # base64url value - avoids false positives on innocuous "d": keys
+          # in .json/.hcl (a real JWK "d" is >= 40 base64url chars).
+          for f in $(git ls-files '*.tf' '*.sh' '*.hcl' '*.json'); do
+            if grep -En '"d"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]{40,}"' "$f" >/dev/null 2>&1; then
+              echo "::error file=$f::JWK private field (\\"d\\":) found — tang key material must never be committed"
+              matches=1
+            fi
+          done
+          # xargs -r: no-run-if-empty (an empty file list would otherwise
+          # leave grep reading stdin forever)
+          if git ls-files | grep -EvE '\.(md|txt)$' | xargs -r grep -El 'BEGIN [A-Z ]*PRIVATE KEY' 2>/dev/null; then
+            echo "::error::PEM private key material found in tracked files"
+            matches=1
+          fi
+          if [ "$matches" -ne 0 ]; then
+            exit 1
+          fi
+          echo "No private key material in tracked code files (OK)"

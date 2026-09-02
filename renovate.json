@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh, and the OpenTofu version pinned in .opentofu-version (both via regex custom managers). Minor/patch bumps automerge once CI is green; MAJOR bumps always land as PRs for human review. Requires the Renovate GitHub App installed on this repo. Note: hosted-app commits are unsigned (signing is self-hosted-only), but squash merges produce GitHub web-flow-signed commits on main, so required_signatures holds; if platformAutomerge ever trips on the signature check, add renovate[bot] to the main-ruleset bypass list.",
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Gatus docker image pinned in the provisioning script",
+      "managerFilePatterns": ["/^scripts/010-provision\\.sh$/"],
+      "matchStrings": [
+        "\\s*# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\s*\\n\\s*[A-Z_]+=\"${depName}:(?<currentValue>[^\\s\"]+)\""
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "OpenTofu CLI version pinned in .opentofu-version",
+      "managerFilePatterns": ["/^\\.opentofu-version$/"],
+      "matchStrings": [
+        "^(?<currentValue>\\d+\\.\\d+\\.\\d+)$"
+      ],
+      "depNameTemplate": "opentofu/opentofu",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver-coerced"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Auto-merge minor and patch bumps (Gatus image, action pins, tofu patch) once CI is green",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    }
+  ]
+}
