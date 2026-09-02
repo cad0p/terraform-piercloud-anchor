@@ -21,4 +21,4 @@ Every script in this directory follows the same invariants:
 
 | Script | Runs on | Purpose |
 |---|---|---|
-| `010-provision.sh` | the anchor box | install tang + Uptime Kuma, print thumbprint, key-leak assertion, print clevis bind next steps |
+| `010-provision.sh` | the anchor box | install tang + Gatus monitor, print thumbprint, key-leak assertion, config-as-file monitor, print clevis bind next steps |

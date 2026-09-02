@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh (regex custom manager), and the OpenTofu version in .opentofu-version.",
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Gatus docker image pinned in the provisioning script",
+      "managerFilePatterns": ["/^scripts/010-provision\\.sh$/"],
+      "matchStrings": [
+        "\\s*# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\s*\\n\\s*[A-Z_]+=\"${depName}:(?<currentValue>[^\\s\"]+)\""
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ]
+}

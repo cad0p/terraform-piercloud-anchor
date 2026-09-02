@@ -16,8 +16,10 @@
 set -euo pipefail
 
 TANG_KEYS_DIR="/var/db/tang"
-KUMA_CONTAINER="uptime-kuma"
-KUMA_PORT="3001"
+# renovate: depName=twinproduction/gatus datasource=docker
+GATUS_IMAGE="twinproduction/gatus:v5.36.0"
+GATUS_PORT="8080"
+GATUS_CONFIG="/etc/gatus/config.yaml"
 
 log()  { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARNING:\033[0m %s\n' "$*"; }
@@ -95,7 +97,7 @@ Do NOT apply that configuration; investigate before proceeding."
 assert_no_key_leak
 
 # ---------------------------------------------------------------------------
-# c) docker + Uptime Kuma (idempotent; sqlite persists in a docker volume)
+# c) docker + Gatus monitor (idempotent; config-as-file, no UI bootstrap)
 # ---------------------------------------------------------------------------
 log "Installing docker"
 if ! docker info >/dev/null 2>&1; then
@@ -111,77 +113,105 @@ https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_C
 fi
 systemctl enable --now docker >/dev/null 2>&1 || true
 
-log "Running Uptime Kuma (bound to 127.0.0.1:${KUMA_PORT}, volume: uptime-kuma)"
-if docker ps --format '{{.Names}}' | grep -qx "${KUMA_CONTAINER}"; then
-  log "Uptime Kuma already running"
-elif docker ps -a --format '{{.Names}}' | grep -qx "${KUMA_CONTAINER}"; then
-  docker start "${KUMA_CONTAINER}" >/dev/null
+log "Running Gatus monitor (bound to 127.0.0.1:${GATUS_PORT}, config: ${GATUS_CONFIG})"
+if docker ps --format '{{.Names}}' | grep -qx "gatus"; then
+  log "Gatus already running"
+elif docker ps -a --format '{{.Names}}' | grep -qx "gatus"; then
+  docker start gatus >/dev/null
 else
-  docker run -d --name "${KUMA_CONTAINER}" --restart unless-stopped \
-    -p 127.0.0.1:${KUMA_PORT}:3001 -v uptime-kuma:/app/data \
-    louislam/uptime-kuma:1 >/dev/null
+  docker run -d --name gatus --restart unless-stopped \
+    -p 127.0.0.1:${GATUS_PORT}:8080 \
+    -v "${GATUS_CONFIG}:/config/config.yaml:ro" \
+    --mount type=volume,source=gatus-data,target=/data \
+    "${GATUS_IMAGE}" >/dev/null
 fi
 
 # ---------------------------------------------------------------------------
-# d) one-time Kuma admin password (generated, printed ONCE, stored nowhere)
+# d) Gatus config (written on first run only - user edits are never clobbered;
+#    sqlite storage in the gatus-data volume keeps the availability history)
 # ---------------------------------------------------------------------------
-log "Generating a suggested Uptime Kuma admin password"
-# LC_ALL=C avoids 'Illegal byte sequence' under UTF-8 locales; '|| true'
-# guards against SIGPIPE (exit 141) from `head` closing the pipe early —
-# either failure would otherwise abort the script mid-way (set -euo pipefail).
-KUMA_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20 || true)
-[ -n "${KUMA_PASSWORD}" ] || die "password generation failed — re-run the script"
-echo
-echo "  ┌──────────────────────────────────────────────────────────────────┐"
-echo "  │ SAVE THIS NOW — shown ONCE, never printed again, stored nowhere: │"
-echo "  │                                                                  │"
-echo "  │   Uptime Kuma admin password: ${KUMA_PASSWORD}   │"
-echo "  └──────────────────────────────────────────────────────────────────┘"
-echo
-warn "When you first open the Kuma UI you create the admin account — use this \
-password there. If you skip this now it is unrecoverable (re-run the script \
-for a fresh suggestion)."
-echo
+if [ -f "${GATUS_CONFIG}" ]; then
+  log "Gatus config already present at ${GATUS_CONFIG} - kept as-is"
+else
+  log "Writing Gatus config to ${GATUS_CONFIG}"
+  ANCHOR_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  mkdir -p "$(dirname "${GATUS_CONFIG}")"
+  cat > "${GATUS_CONFIG}" <<GCFG
+# Managed by terraform-piercloud-tang (scripts/010-provision.sh).
+# Edit freely - re-running the script will NOT overwrite this file.
+# Docs: https://gatus.io/docs
 
-# ---------------------------------------------------------------------------
-# e) Kuma monitor — the socket.io API is not clean to script from bash,
-#    so print the exact manual settings instead (guided setup).
-# ---------------------------------------------------------------------------
-log "Kuma monitor setup (manual, 2 minutes — the socket.io API is not scriptable)"
-ANCHOR_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-cat <<MON
-  Open the Kuma UI (see "Reaching the Kuma UI" below), create the admin
-  account, then add TWO monitors:
+storage:
+  path: /data/gatus.db   # sqlite in the gatus-data volume: history survives restarts
 
-  Monitor 1 — "tang local"
-    Type:             HTTP(s)
-    URL:              http://127.0.0.1/adv
-    Heartbeat interval: 60 s    Retries: 3
-    (tang answers GET /adv with its public key set; 200 = alive)
+alerting:
+  # Pick ONE channel and fill it in, then reference it from each endpoint's
+  # "alerts" list. Gatus PUSHES alerts when an endpoint fails - a dashboard
+  # you never open is useless; the push is the point. Examples:
+  #
+  #   ntfy:      # self-hostable push, simplest
+  #     url: https://ntfy.yourdomain.tld
+  #     topic: piercloud-anchor
+  #   telegram:
+  #     token: <bot-token>
+  #     id: <chat-id>
+  #   smtp:      # plain email
+  #     username: you@example.com
+  #     password: <app-password>
+  #     from: gatus@example.com
+  #     to: ["you@example.com"]
 
-  Monitor 2 — "tang local via IPv6 loopback or link-local" (optional)
-    The anchor cannot probe its own external address through the netcup
-    firewall (the policy admits YOUR main box only — probing itself from
-    its public IP would show a permanent false DOWN). Leave external-path
-    monitoring to your MAIN box: after binding, clevis itself proves the
-    full path at every boot, and you can manually verify any time with:
+metrics: false
 
-      curl -fsS http://<anchor-ip>/adv    (200 + JSON = tang is answering; run from the MAIN box)
+endpoints:
+  # The anchor itself - local only, never firewalled, always accurate.
+  - name: tang (local)
+    url: http://127.0.0.1/adv
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+    # alerts:
+    #   - type: ntfy        # <- match the channel you configured above
+
+  # YOUR MAIN SERVER - probe it by DNS NAME, not IP: Gatus never caches DNS,
+  # so when you migrate and flip the record, the monitor follows automatically
+  # and the availability history stays continuous across the cutover.
+  # Uncomment and adapt (HTTPS, TCP, ICMP, DNS record checks all supported):
+  #
+  # - name: main-server https
+  #   url: https://your-main-server.example.com
+  #   interval: 60s
+  #   conditions:
+  #     - "[STATUS] == 200"
+  #   alerts:
+  #     - type: ntfy
+  #       failure-threshold: 3
+  #
+  # - name: main-server ssh
+  #   host: "ssh://your-main-server.example.com:22"
+  #   interval: 60s
+  #   conditions:
+  #     - "[CONNECTED] == true"
+GCFG
+  echo
+  cat <<MON
+  The monitor config is at ${GATUS_CONFIG} - this is the one file to edit:
+
+    1. Configure an alerting channel (ntfy / Telegram / SMTP) in "alerting".
+    2. Uncomment the "YOUR MAIN SERVER" endpoints and point them at your
+       server's real DNS names (they follow DNS flips automatically).
+    3. Apply:  docker restart gatus
+    4. Sanity-check:  docker logs gatus   (config errors show there)
+
+  Gatus UI: bound to 127.0.0.1:${GATUS_PORT} on the anchor. Reach it via YOUR
+  OWN SSH tunnel (needs an SSH key YOU added in the netcup SCP; this module
+  provisions no SSH):
+
+      ssh -L ${GATUS_PORT}:127.0.0.1:${GATUS_PORT} root@${ANCHOR_IP:-<anchor-ip>}
+      then open http://localhost:${GATUS_PORT}
 MON
 echo
-cat <<UI
-  Reaching the Kuma UI: it listens on 127.0.0.1:${KUMA_PORT} only.
-  The module's firewall admits TCP/80 from your main box — not ${KUMA_PORT}.
-  Reach Kuma via YOUR OWN SSH tunnel (needs an SSH key YOU added in the
-  netcup SCP; this module provisions no SSH):
-
-      ssh -L ${KUMA_PORT}:127.0.0.1:${KUMA_PORT} root@${ANCHOR_IP:-<anchor-ip>}
-      then open http://localhost:${KUMA_PORT}
-
-  (If you accept the exposure, you may instead bind 0.0.0.0 and add an
-  ingress TCP/${KUMA_PORT} rule for your main-box IP in the netcup SCP.)
-UI
-echo
+fi
 
 # ---------------------------------------------------------------------------
 # g) next steps on your MAIN box
@@ -201,6 +231,9 @@ cat <<NEXT
      its own when clevis reaches this anchor. That is success.
   5. Keep the LUKS passphrase keyslot. This anchor is availability,
      never the security anchor; if it is down, you type the passphrase.
+  6. From your MAIN box, verify the external path any time (the anchor
+     cannot probe its own external address through the firewall):
+       curl -fsS http://${ANCHOR_IP:-<anchor-ip>}/adv    # 200 + JSON = tang is answering
 NEXT
 echo
-log "Done. tang is up, the thumbprint is above, Kuma is installing its UI."
+log "Done. tang is up, the thumbprint is above, Gatus config is at ${GATUS_CONFIG}."

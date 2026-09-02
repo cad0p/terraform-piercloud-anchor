@@ -2,7 +2,7 @@
 
 Public repo: `terraform-piercloud-tang` — an OpenTofu module that turns a
 netcup VPS into a tang/clevis NBDE anchor (network-bound disk unlock) with an
-Uptime Kuma availability monitor. Written fresh for this repo; follows the
+Gatus availability monitor (config-as-file, Renovate-pinned image). Written fresh for this repo; follows the
 house conventions of its author's other repos.
 
 ## Purpose and shape

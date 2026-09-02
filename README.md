@@ -35,9 +35,10 @@ server name — it does not create or destroy servers (the netcup SCP API cannot
 - the firewall attachment on the anchor's network interface.
 
 Then **one script** (run by you on the anchor's console) installs `tang`,
-prints its **thumbprint**, and installs Docker + Uptime Kuma so you can watch
-the anchor's availability. The script generates the tang keypair **on the box**
-and generates a Kuma admin password **once**, for you to save immediately.
+prints its **thumbprint**, and installs Docker + the **Gatus** availability
+monitor — config-as-file, no admin account, no UI bootstrap. The script
+generates the tang keypair **on the box**; nothing it prints is secret
+except the thumbprint you choose to save.
 
 The module provisions **no SSH access** — inbound or outbound. You administer
 the anchor from the netcup SCP remote console, or by adding your own SSH key
@@ -81,9 +82,13 @@ reboot test): [docs/usage.md](docs/usage.md).
 3. **Keep the passphrase keyslot.** The tang anchor is convenience and
    availability; the passphrase is the true root. If the anchor dies, you
    unlock with the passphrase.
-4. **Watch the anchor.** The script installs Uptime Kuma on the anchor itself;
-   add a monitor for the anchor's IP (and any services it helps you boot).
-   A dead anchor never blocks boot — it just means you type the passphrase.
+4. **Watch your server from the anchor.** The script installs Gatus on the
+   anchor — an independent, always-on vantage point *outside* your main box.
+   Probe your main server's services **by DNS name** (Gatus never caches DNS,
+   so when you migrate and flip the record, the monitor follows automatically
+   and the availability history stays continuous across the cutover), and
+   configure an alerting channel (ntfy / Telegram / SMTP) so failures are
+   **pushed** to you, not waiting on a dashboard.
 5. **Understand the anchor**: it is an unencrypted, always-on box whose only
    job is holding an unlock key and answering clevis challenges. It holds
    *no* credential that reaches your main box. **You administer the anchor;

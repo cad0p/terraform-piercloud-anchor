@@ -13,7 +13,7 @@ mostly netcup web UI.
 ## 1. Order the anchor ("piko"-class VPS)
 
 In the netcup SCP, order a small VPS (a 1 vCore / 1 GB / 30 GB "piko" is
-plenty for tang + Uptime Kuma), any Debian-family image, set the root
+plenty for tang + Gatus), any Debian-family image, set the root
 password at order time, and note:
 
 - the **server name** (e.g. `SCPI-1234567`) or the numeric **server id**,
@@ -69,24 +69,30 @@ curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main
 The script: installs `tang`, enables `tangd.socket` (port 80), generates the
 tang keypair **on the box**, prints the **thumbprint**, asserts that no tang
 key material appears in any terraform state in the working directory, and
-installs Docker + Uptime Kuma (bound to `127.0.0.1:3001`).
+installs Docker + **Gatus** (bound to `127.0.0.1:8080`, config at
+`/etc/gatus/config.yaml`, sqlite history in the `gatus-data` volume).
 
 **Save the thumbprint in your password manager NOW.**
 
-## 5. Create the Kuma admin + monitors
+## 5. Configure the monitor
 
-Kuma listens on `127.0.0.1:3001` on the anchor. Reach it via your own SSH
-tunnel (needs an SSH key YOU added in the netcup SCP):
+The one file to edit on the anchor is `/etc/gatus/config.yaml` (written on
+first run; re-running the script never overwrites your edits):
+
+1. Configure an alerting channel (ntfy / Telegram / SMTP) in `alerting`.
+2. Uncomment the "YOUR MAIN SERVER" endpoints, pointing them at your
+   server's real DNS names — they follow DNS flips automatically, and the
+   availability history stays continuous across cutovers.
+3. Apply with `docker restart gatus`; check `docker logs gatus` for
+   config errors.
+
+Optional UI: Gatus serves a dashboard on `127.0.0.1:8080`. Reach it via your
+own SSH tunnel (needs an SSH key YOU added in the netcup SCP):
 
 ```bash
-ssh -L 3001:127.0.0.1:3001 root@<anchor-ip>
-# open http://localhost:3001
+ssh -L 8080:127.0.0.1:8080 root@<anchor-ip>
+# open http://localhost:8080
 ```
-
-Create the admin account using the password the script printed once (if you
-missed it, re-run the script for a fresh suggestion), then add the two
-monitors printed by the script (tang local `http://127.0.0.1/adv` + via the
-anchor IP).
 
 ## 6. Bind your main box (clevis)
 
