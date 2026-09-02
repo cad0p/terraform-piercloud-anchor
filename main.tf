@@ -35,7 +35,7 @@ resource "netcup_scp_user_firewall_policy" "tang" {
   count = var.scp_user_id != null ? 1 : 0
 
   user_id     = var.scp_user_id
-  name        = "piercloud-tang"
+  name        = "piercloud-tang-${var.hostname}"
   description = "tang (TCP/80) from the main box only; egress open. Managed by terraform-piercloud-tang."
 
   rules = concat(
@@ -69,7 +69,7 @@ resource "netcup_scp_user_firewall_policy" "tang" {
 
 # Attach the policy to the anchor's first network interface.
 resource "netcup_scp_server_interface_firewall" "anchor" {
-  count = var.scp_user_id != null && local.resolved_server_id != null ? 1 : 0
+  count = var.scp_user_id != null && local.resolved_server_id != null && local.interface_mac != null ? 1 : 0
 
   # attach (enabled firewall management only)
 
@@ -82,8 +82,11 @@ resource "netcup_scp_server_interface_firewall" "anchor" {
 
 locals {
   # First interface of the adopted server; sorted for determinism.
+  # try() guards the empty-interface-list case (an unguarded [0] crashes
+  # plan with "Invalid index ... empty set"); the firewall resource's count
+  # re-checks for a non-null MAC before consuming it.
   interface_mac = var.scp_user_id != null && local.resolved_server_id != null ? (
-    sort([for i in data.netcup_scp_server_interfaces.anchor[0].scp_server_interfaces : i.mac])[0]
+    try(sort([for i in data.netcup_scp_server_interfaces.anchor[0].scp_server_interfaces : i.mac])[0], null)
   ) : null
 }
 
@@ -99,7 +102,7 @@ check "server_name_unique" {
     condition = var.server_name == null || length(local.server_id_by_name) == 1
     error_message = format(
       "Server name %q matched %d servers in your netcup account; it must match exactly one. Rename the server in the SCP or use var.server_id instead.",
-      coalesce(var.server_name, ""), length(local.server_id_by_name),
+      var.server_name != null ? var.server_name : "", length(local.server_id_by_name),
     )
   }
 }

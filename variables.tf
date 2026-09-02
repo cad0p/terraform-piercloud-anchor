@@ -30,12 +30,22 @@ variable "server_name" {
 variable "allow_main_box_ipv4" {
   description = "IPv4 address of your main box; tang (TCP/80) accepts challenges from this address only."
   type        = string
+
+  validation {
+    condition     = can(cidrhost("${var.allow_main_box_ipv4}/32", 0))
+    error_message = "Must be a single IPv4 address (a /32 is appended automatically when building the firewall source)."
+  }
 }
 
 variable "allow_main_box_ipv6" {
   description = "Optional IPv6 address of your main box; also allowed to reach tang (TCP/80)."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.allow_main_box_ipv6 == null || can(cidrhost("${var.allow_main_box_ipv6}/128", 0))
+    error_message = "Must be a single IPv6 address (a /128 is appended automatically when building the firewall source)."
+  }
 }
 
 variable "hostname" {

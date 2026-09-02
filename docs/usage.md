@@ -23,8 +23,9 @@ password at order time, and note:
 
 ## 2. Create SCP API credentials
 
-In the netcup SCP, create API credentials (OAuth device flow: access +
-refresh token). Export them — never write them to disk or code:
+In the netcup SCP, create API credentials for the SCP REST API (an access
+token, plus an optional refresh token for automatic renewal). Export them —
+never write them to disk or code:
 
 ```bash
 export NETCUP_SCP_ACCESS_TOKEN="..."

@@ -126,7 +126,11 @@ fi
 # d) one-time Kuma admin password (generated, printed ONCE, stored nowhere)
 # ---------------------------------------------------------------------------
 log "Generating a suggested Uptime Kuma admin password"
-KUMA_PASSWORD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20)
+# LC_ALL=C avoids 'Illegal byte sequence' under UTF-8 locales; '|| true'
+# guards against SIGPIPE (exit 141) from `head` closing the pipe early —
+# either failure would otherwise abort the script mid-way (set -euo pipefail).
+KUMA_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20 || true)
+[ -n "${KUMA_PASSWORD}" ] || die "password generation failed — re-run the script"
 echo
 echo "  ┌──────────────────────────────────────────────────────────────────┐"
 echo "  │ SAVE THIS NOW — shown ONCE, never printed again, stored nowhere: │"
@@ -155,13 +159,14 @@ cat <<MON
     Heartbeat interval: 60 s    Retries: 3
     (tang answers GET /adv with its public key set; 200 = alive)
 
-  Monitor 2 — "tang via firewall path"
-    Type:             HTTP(s)
-    URL:              http://${ANCHOR_IP}/adv
-    Heartbeat interval: 300 s   Retries: 3
-    (proves tangd + the local firewall path stay up; your MAIN box's
-    reachability is what actually matters and is checked at every boot by
-    clevis itself)
+  Monitor 2 — "tang local via IPv6 loopback or link-local" (optional)
+    The anchor cannot probe its own external address through the netcup
+    firewall (the policy admits YOUR main box only — probing itself from
+    its public IP would show a permanent false DOWN). Leave external-path
+    monitoring to your MAIN box: after binding, clevis itself proves the
+    full path at every boot, and you can manually verify any time with:
+
+      curl -fsS http://<anchor-ip>/adv | jq -r .payload | ...  (from the MAIN box)
 MON
 echo
 cat <<UI
