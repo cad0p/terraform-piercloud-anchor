@@ -6,7 +6,7 @@ README; this file carries the verbatim statements and the rationale.
 ## Invariant 1 — tang keys never enter Terraform state
 
 > The tang private key **never** enters tf state or plan output. The keypair
-> is generated **on the box** by `scripts/10-provision.sh` — never by the
+> is generated **on the box** by `scripts/010-provision.sh` — never by the
 > module — so state holds server configuration only.
 
 **Rationale.** Terraform/OpenTofu state is a plaintext file that tends to

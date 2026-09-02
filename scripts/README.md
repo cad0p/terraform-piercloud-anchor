@@ -2,8 +2,9 @@
 
 Every script in this directory follows the same invariants:
 
-1. **Numbered.** `NN-name.sh`, ordered by execution phase. Numbers are never
-   reused; new scripts take the next free number.
+1. **Numbered.** `NNN-name.sh` (three-digit, zero-padded — matches the
+   pcad.it-infra house convention), ordered by execution phase. Numbers are
+   never reused; new scripts take the next free number.
 2. **Human-run.** Scripts run ON the target box, started by a human (netcup
    SCP remote console or your own SSH session). Nothing in this repo connects
    to your boxes; there is no automation host, no agent, no SSH inbound.
@@ -20,4 +21,4 @@ Every script in this directory follows the same invariants:
 
 | Script | Runs on | Purpose |
 |---|---|---|
-| `10-provision.sh` | the anchor box | install tang + Uptime Kuma, print thumbprint, key-leak assertion, print clevis bind next steps |
+| `010-provision.sh` | the anchor box | install tang + Uptime Kuma, print thumbprint, key-leak assertion, print clevis bind next steps |

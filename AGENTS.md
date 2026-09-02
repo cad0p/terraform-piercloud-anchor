@@ -19,7 +19,7 @@ house conventions of its author's other repos.
 ## The two hard invariants (never violate, never weaken)
 
 1. **Tang keys never enter Terraform state.** The keypair is generated on the
-   box by `scripts/10-provision.sh`, never in `.tf` code. Never add resources,
+   box by `scripts/010-provision.sh`, never in `.tf` code. Never add resources,
    provisioners, or data flows that could put key material into state, plan
    output, or CI logs. CI greps tracked code files for key material patterns.
 2. **The anchor is a key-holder, never an access-path.** It holds no

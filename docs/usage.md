@@ -61,7 +61,7 @@ is provisioned anywhere — administration of the anchor is user-direct: the
 SCP console, or your own SSH key added via netcup SCP at order time.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/10-provision.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/010-provision.sh | bash
 ```
 
 (Or paste the script into the console. It is idempotent — safe to re-run.)
@@ -113,7 +113,7 @@ if the boot prompt never clears, check that first.)
 
 Reboot the main box. A brief passphrase prompt that continues on its own is
 the *success* behavior: clevis reached the anchor, got the key, and unlocked.
-Verify twice (and re-run `10-provision.sh` once from the top and confirm the
+Verify twice (and re-run `010-provision.sh` once from the top and confirm the
 anchor still converges — scripts/README.md invariants).
 
 Disaster-recovery sanity check: stop tang on the anchor (or shut the anchor

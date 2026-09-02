@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# 10-provision.sh — provision the tang/clevis NBDE anchor + uptime monitor.
+# 010-provision.sh — provision the tang/clevis NBDE anchor + uptime monitor.
 #
 # WHERE THIS RUNS: ON the anchor box itself (the netcup VPS you adopted with
 # the terraform-piercloud-tang module), as root, via the netcup SCP remote
 # console (browser VNC) — or your own SSH session if you added your own SSH
 # key in the SCP. Nothing in this repo ever connects to the anchor.
 #
-#   curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/10-provision.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/010-provision.sh | bash
 #
 # Properties (see scripts/README.md): idempotent, human-run, no secrets.
 # The tang keypair is generated ON THIS BOX and never leaves it. This script

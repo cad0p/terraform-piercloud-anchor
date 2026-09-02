@@ -62,7 +62,7 @@ tofu apply -var server_name="SCPI-123456" \
 
 # 3. Open the netcup SCP -> your server -> remote console (browser VNC),
 #    log in as root, then run the provisioning script:
-curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/10-provision.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/010-provision.sh | bash
 
 # 4. Save the printed tang thumbprint in your password manager NOW.
 ```
