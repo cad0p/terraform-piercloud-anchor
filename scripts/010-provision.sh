@@ -97,45 +97,78 @@ Do NOT apply that configuration; investigate before proceeding."
 assert_no_key_leak
 
 # ---------------------------------------------------------------------------
-# c) docker + Gatus monitor (idempotent; config-as-file, no UI bootstrap)
+# c) Gatus config (config-as-file; written on first run, never clobbered; a
+#    refreshed template lands as <config>.distrib for the user to diff/merge)
 # ---------------------------------------------------------------------------
-log "Installing docker"
-if ! docker info >/dev/null 2>&1; then
-  apt-get install -y -qq ca-certificates curl gnupg >/dev/null
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-    > /etc/apt/sources.list.d/docker.list
-  apt-get update -qq
-  apt-get install -y -qq docker-ce docker-ce-cli containerd.io >/dev/null
-fi
-systemctl enable --now docker >/dev/null 2>&1 || true
-
-log "Running Gatus monitor (bound to 127.0.0.1:${GATUS_PORT}, config: ${GATUS_CONFIG})"
-if docker ps --format '{{.Names}}' | grep -qx "gatus"; then
-  log "Gatus already running"
-elif docker ps -a --format '{{.Names}}' | grep -qx "gatus"; then
-  docker start gatus >/dev/null
-else
-  docker run -d --name gatus --restart unless-stopped \
-    -p 127.0.0.1:${GATUS_PORT}:8080 \
-    -v "${GATUS_CONFIG}:/config/config.yaml:ro" \
-    --mount type=volume,source=gatus-data,target=/data \
-    "${GATUS_IMAGE}" >/dev/null
-fi
-
-# ---------------------------------------------------------------------------
-# d) Gatus config (written on first run only - user edits are never clobbered;
-#    sqlite storage in the gatus-data volume keeps the availability history)
-# ---------------------------------------------------------------------------
+log "Installing Gatus config (${GATUS_CONFIG})"
+ANCHOR_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+mkdir -p "$(dirname "${GATUS_CONFIG}")"
 if [ -f "${GATUS_CONFIG}" ]; then
-  log "Gatus config already present at ${GATUS_CONFIG} - kept as-is"
+  log "Gatus config already present - kept as-is (your edits are never touched)"
+  # A newer release may have added settings; refresh the template copy the
+  # user can diff/merge by hand. The LIVE config is NEVER overwritten.
+  if ! cmp -s "${GATUS_CONFIG}" "${GATUS_CONFIG}.distrib"; then
+    cat > "${GATUS_CONFIG}.distrib" <<GCFG
+# Managed by terraform-piercloud-tang (scripts/010-provision.sh).
+# Template copy: diff against ${GATUS_CONFIG} and merge what you want.
+# Docs: https://gatus.io/docs
+
+storage:
+  path: /data/gatus.db   # sqlite in the gatus-data volume: history survives restarts
+
+alerting:
+  # Pick ONE channel and fill it in, then reference it from each endpoint's
+  # "alerts" list. Gatus PUSHES alerts when an endpoint fails - a dashboard
+  # you never open is useless; the push is the point. Examples:
+  #
+  #   ntfy:      # self-hostable push, simplest
+  #     url: https://ntfy.yourdomain.tld
+  #     topic: piercloud-anchor
+  #   telegram:
+  #     token: <bot-token>
+  #     id: <chat-id>
+  #   smtp:      # plain email
+  #     username: you@example.com
+  #     password: <app-password>
+  #     from: gatus@example.com
+  #     to: ["you@example.com"]
+
+metrics: false
+
+endpoints:
+  # The anchor itself - local only, never firewalled, always accurate.
+  - name: tang (local)
+    url: http://127.0.0.1/adv
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+    # alerts:
+    #   - type: ntfy        # <- match the channel you configured above
+
+  # YOUR MAIN SERVER - probe it by DNS NAME, not IP: Gatus never caches DNS,
+  # so when you migrate and flip the record, the monitor follows automatically
+  # and the availability history stays continuous across the cutover.
+  # Uncomment and adapt (HTTPS, TCP, ICMP, DNS record checks all supported):
+  #
+  # - name: main-server https
+  #   url: https://your-main-server.example.com
+  #   interval: 60s
+  #   conditions:
+  #     - "[STATUS] == 200"
+  #   alerts:
+  #     - type: ntfy
+  #       failure-threshold: 3
+  #
+  # - name: main-server ssh
+  #   host: "ssh://your-main-server.example.com:22"
+  #   interval: 60s
+  #   conditions:
+  #     - "[CONNECTED] == true"
+GCFG
+    echo "  Template refreshed: ${GATUS_CONFIG}.distrib (diff + merge by hand)"
+  fi
 else
-  log "Writing Gatus config to ${GATUS_CONFIG}"
-  ANCHOR_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  mkdir -p "$(dirname "${GATUS_CONFIG}")"
+  log "Writing Gatus config (first run)"
   cat > "${GATUS_CONFIG}" <<GCFG
 # Managed by terraform-piercloud-tang (scripts/010-provision.sh).
 # Edit freely - re-running the script will NOT overwrite this file.
@@ -210,30 +243,32 @@ GCFG
       ssh -L ${GATUS_PORT}:127.0.0.1:${GATUS_PORT} root@${ANCHOR_IP:-<anchor-ip>}
       then open http://localhost:${GATUS_PORT}
 MON
-echo
+  echo
 fi
 
 # ---------------------------------------------------------------------------
-# g) next steps on your MAIN box
+# d) Run Gatus (container recreated when the pinned image changed - so an
+#    auto-bumped pin actually REACHES deployed anchors on script re-run;
+#    config and the sqlite history volume survive the recreation)
 # ---------------------------------------------------------------------------
-log "Next steps — on your MAIN box (not here):"
-cat <<NEXT
-  1. Install the client pieces:
-       apt-get install clevis clevis-luks clevis-initramfs
-  2. Bind your LUKS device to THIS anchor (find <device> with \`lsblk -f\`,
-     e.g. /dev/nvme0n1p3). At bind time, clevis shows a thumbprint —
-     it MUST match the thumbprint printed above. If it does not match,
-     ANSWER NO and investigate:
-       clevis luks bind -d <device> tang '{"url":"http://${ANCHOR_IP:-<anchor-ip>}"}'
-  3. Rebuild the initramfs:
-       update-initramfs -u
-  4. Reboot test: the unlock prompt may appear briefly, then continue on
-     its own when clevis reaches this anchor. That is success.
-  5. Keep the LUKS passphrase keyslot. This anchor is availability,
-     never the security anchor; if it is down, you type the passphrase.
-  6. From your MAIN box, verify the external path any time (the anchor
-     cannot probe its own external address through the firewall):
-       curl -fsS http://${ANCHOR_IP:-<anchor-ip>}/adv    # 200 + JSON = tang is answering
-NEXT
-echo
+log "Running Gatus monitor (bound to 127.0.0.1:${GATUS_PORT})"
+if docker ps --format '{{.Names}}' | grep -qx "gatus"; then
+  RUNNING_IMAGE=$(docker inspect --format '{{.Config.Image}}' gatus)
+  if [ "${RUNNING_IMAGE}" = "${GATUS_IMAGE}" ]; then
+    log "Gatus already running on ${GATUS_IMAGE}"
+  else
+    log "Gatus image changed (${RUNNING_IMAGE} -> ${GATUS_IMAGE}) - recreating container"
+    docker rm -f gatus >/dev/null
+  fi
+elif docker ps -a --format '{{.Names}}' | grep -qx "gatus"; then
+  docker rm -f gatus >/dev/null   # stale stopped container; recreated below
+fi
+if ! docker ps --format '{{.Names}}' | grep -qx "gatus"; then
+  docker run -d --name gatus --restart unless-stopped \
+    -p 127.0.0.1:${GATUS_PORT}:8080 \
+    -v "${GATUS_CONFIG}:/config/config.yaml:ro" \
+    --mount type=volume,source=gatus-data,target=/data \
+    "${GATUS_IMAGE}" >/dev/null
+fi
+
 log "Done. tang is up, the thumbprint is above, Gatus config is at ${GATUS_CONFIG}."

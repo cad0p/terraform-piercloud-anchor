@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh, and the OpenTofu version pinned in .opentofu-version (both via regex custom managers).",
+  "description": "Auto-bump pins so exact versions never rot: GitHub Actions (@v1 pins incl. semver-calver-release), the Gatus docker image pinned inside scripts/010-provision.sh, and the OpenTofu version pinned in .opentofu-version (both via regex custom managers). Minor/patch bumps automerge once CI is green; MAJOR bumps always land as PRs for human review. Requires: (1) the Renovate GitHub App installed on this repo, (2) post-bootstrap, renovate[bot] on the main-ruleset bypass list (its commits are unsigned).",
   "enabledManagers": ["github-actions", "custom.regex"],
   "customManagers": [
     {
@@ -23,6 +23,15 @@
       "depNameTemplate": "opentofu/opentofu",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver-coerced"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Auto-merge minor and patch bumps (Gatus image, action pins, tofu patch) once CI is green",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
     }
   ]
 }
