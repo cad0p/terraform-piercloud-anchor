@@ -26,6 +26,8 @@ Gatus. Official Debian-family image, root password by email. Do NOT apply a welc
 
 **First login (CCP):** the "Your login credentials for the netcup CCP" email holds your customer number + password. Log in at <https://www.customercontrolpanel.de/> (paste both, select "I don't process personal data"), open the personal page (person icon), change the password, then scroll to two-factor authentication and enable it: tap (or right-click) the QR code to save it to your password manager, then copy the temporary code from the PM back to confirm. Finally check the 💵 tab that the invoice is paid — if not, pay it via the 💳 next to "unpaid".
 
+**SCP login (separate credentials):** the server control panel at <https://www.servercontrolpanel.de/SCP/> uses its own password, sent in a separate email — change it on first login and enable 2FA there too.
+
 Note:
 
 - the **server name** (e.g. `SCPI-1234567`) or numeric **server id**,
