@@ -174,7 +174,7 @@ jobs:
           # Stem match with a greedy word tail so compounds trip it too;
           # benign prose/code matches use the escape hatch on the same line.
           # Patterns run from origin/main (see fetch step); files from HEAD.
-          FORBIDDEN='rescue' # ci-allowlist: defining use — this line states the forbidden-surface pattern, not a live reference (tail catches compound forms too).
+          FORBIDDEN='\b(rescue|image|snapshot|iso|disk)[a-z0-9_-]*' # ci-allowlist: defining use — this line states the forbidden-surface pattern, not a live reference (tail catches compound forms too).
           MAIN_FORBIDDEN="$(grep -E "^[[:space:]]*FORBIDDEN=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"
           if [ -n "$MAIN_FORBIDDEN" ]; then FORBIDDEN="$MAIN_FORBIDDEN"; else echo "::notice::FORBIDDEN contract missing in origin/main — using working-tree value (transition only)"; fi
           [ -n "$FORBIDDEN" ] || { echo "::error::could not determine FORBIDDEN pattern"; exit 1; }
