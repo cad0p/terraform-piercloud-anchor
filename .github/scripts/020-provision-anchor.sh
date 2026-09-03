@@ -38,8 +38,9 @@
 #   RUN_ID                   github.run_id — the idempotency key; the tmp
 #                            policy name is piercloud-tmp-<server>-<run>.
 #   ANCHOR_HOST              ssh target (anchor IPv4). ANCHOR_SSH_PORT (22).
-#   ROOT_PASSWORD            emailed one-run root password. Masked in the
-#                            workflow via add-mask; referenced here ONLY as
+#   ROOT_PASSWORD            emailed one-run root password. Add-masked in
+#                            the workflow step before use (plus repo-secret
+#                            auto-mask); referenced here ONLY as
 #                            the sshpass environment value — never echoed,
 #                            never logged, never written to disk.
 #   A1_SSH_PUBKEY_1/2        the mandated 2 SSH keys installed at A1.
@@ -181,6 +182,9 @@ fetch_egress_ip() { # dual-endpoint pin, exact match or fail (single host only, 
   b="$(curl -sS --max-time 20 "$IP_ENDPOINT_B" | tr -d '[:space:]')"
   if ! printf '%s' "$a" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
     die "egress-IP endpoint A returned unusable value (fail-closed, not logged)"
+  fi
+  if ! printf '%s' "$b" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    die "egress-IP endpoint B returned unusable value (fail-closed, not logged)"
   fi
   if [ "$a" != "$b" ]; then
     die "egress-IP endpoints disagree (fail-closed): A and B differ — aborting, no window opened"

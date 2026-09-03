@@ -334,6 +334,10 @@ jobs:
           THUMBPRINT_FILE: thumbprint.txt
         run: |
           set -euo pipefail
+          # C-a-shaped explicit mask BEFORE any use: repo secrets are
+          # auto-masked, but the explicit mask covers every expansion path
+          # (same ordering rule as the device_code mask in device-flow).
+          echo "::add-mask::${{ secrets.A1_ROOT_PASSWORD }}"
           # Pre-SSH IP re-fetch (mismatch aborts to sweep inside the script);
           # emailed root password arrives as a masked one-run input and is
           # never printed; the script ends with `passwd -l root`.
