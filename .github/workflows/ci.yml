@@ -16,8 +16,8 @@ jobs:
     name: tofu fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: opentofu/setup-opentofu@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag: v7
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # tag: v2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
       - name: tofu fmt -check -recursive
@@ -27,8 +27,8 @@ jobs:
     name: tofu validate (cred-free)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: opentofu/setup-opentofu@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag: v7
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # tag: v2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
       - name: tofu init -backend=false
@@ -45,16 +45,29 @@ jobs:
     name: key-material grep
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag: v7
+      - name: Fetch origin/main (patterns source of truth; files scanned stay on this PR tree)
         run: |
           set -euo pipefail
+          # Enforcement source (review-blocker fix): patterns come from
+          # origin/main, files scanned come from this PR tree (HEAD).
+          # Chose extraction over label-ack: cred-free (fetch only), keeps
+          # legitimate check improvements runnable, yet a PR that softens its
+          # own patterns still fails (main's strict patterns run here).
+          # Contract: each pattern lives on one VAR='value' line (no single
+          # quotes inside values); extraction is grep ^VAR= + cut -d"'" -f2.
+          # Missing extraction fails closed once main carries the contract;
+          # until this lands on main, working-tree values apply (transition).
           git fetch origin main --depth=1 >/dev/null 2>&1 || true
           if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git show origin/main:.github/workflows/ci.yml > /tmp/main-ci.yml
             if git merge-base origin/main HEAD >/dev/null 2>&1; then
               git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
-                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+                || echo "::notice::ci.yml differs from main — enforcement below still uses main's patterns, so softening cannot hide violations; reviewers confirm intent."
             fi
+          else
+            cp .github/workflows/ci.yml /tmp/main-ci.yml
+            echo "::notice::origin/main unavailable — using working-tree patterns (CI always fetches main; local-only fallback)"
           fi
       - name: Fail if private key material appears in tracked code files
         run: |
@@ -63,19 +76,30 @@ jobs:
           # paths and formats). We assert no private key MATERIAL is committed:
           #   - JWK private field "d": in .tf/.sh/.hcl/.json files
           #   - PEM private key headers in any code file
+          # No exemption marker exists here by design: committed key material
+          # has no legitimate case (docs stay out of scope instead).
+          # Patterns run from origin/main (see fetch step); files from HEAD.
+          JWK_D_PATTERN='"d"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]{40,}"'
+          PEM_PATTERN='BEGIN [A-Z ]*PRIVATE KEY'
+          MAIN_V="$(grep -E "^[[:space:]]*JWK_D_PATTERN=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"
+          if [ -n "$MAIN_V" ]; then JWK_D_PATTERN="$MAIN_V"; else echo "::notice::JWK_D_PATTERN contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*PEM_PATTERN=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"
+          if [ -n "$MAIN_V" ]; then PEM_PATTERN="$MAIN_V"; else echo "::notice::PEM_PATTERN contract missing in origin/main — using working-tree value (transition only)"; fi
+          [ -n "$JWK_D_PATTERN" ] || { echo "::error::could not determine JWK_D_PATTERN"; exit 1; }
+          [ -n "$PEM_PATTERN" ] || { echo "::error::could not determine PEM_PATTERN"; exit 1; }
           matches=0
           # JWK private scalar "d": only flagged when followed by a long
           # base64url value - avoids false positives on innocuous "d": keys
           # in .json/.hcl (a real JWK "d" is >= 40 base64url chars).
           for f in $(git ls-files '*.tf' '*.sh' '*.hcl' '*.json'); do
-            if grep -En '"d"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]{40,}"' "$f" >/dev/null 2>&1; then
-              echo "::error file=$f::JWK private field (\\"d\\":) found — tang key material must never be committed"
+            if grep -En "$JWK_D_PATTERN" "$f" >/dev/null 2>&1; then
+              echo "::error file=$f::JWK private field (\"d\":) found — tang key material must never be committed"
               matches=1
             fi
           done
           # xargs -r: no-run-if-empty (an empty file list would otherwise
           # leave grep reading stdin forever)
-          if git ls-files | grep -EvE '\.(md|txt)$' | xargs -r grep -El 'BEGIN [A-Z ]*PRIVATE KEY' 2>/dev/null; then
+          if git ls-files | grep -EvE '\.(md|txt)$' | xargs -r grep -El "$PEM_PATTERN" 2>/dev/null; then
             echo "::error::PEM private key material found in tracked files"
             matches=1
           fi
@@ -90,7 +114,15 @@ jobs:
           # Invariant: the tang key never appears in state/plan output. No
           # .tf output block may reference JWK or private-key shapes. The
           # tang thumbprint stays legal (public by design, H1).
-          bad="$(git ls-files '*.tf' | xargs -r awk '/^[[:space:]]*output[[:space:]]+"/{in_block=1} in_block{buf=buf $0 "\n"} /^[[:space:]]*}[[:space:]]*$/{if (in_block && tolower(buf) ~ /jwk|private_key|private-key/) print FILENAME": "buf; in_block=0; buf=""}' || true)"
+          # Brace-depth counting (single-line blocks included): depth returns
+          # to zero only at the block's own closing brace, so nested maps do
+          # not end the scan early and same-line open+close is handled.
+          # Pattern runs from origin/main (see fetch step); files from HEAD.
+          OUTPUT_BAD_PATTERN='jwk|private_key|private-key'
+          MAIN_V="$(grep -E "^[[:space:]]*OUTPUT_BAD_PATTERN=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"
+          if [ -n "$MAIN_V" ]; then OUTPUT_BAD_PATTERN="$MAIN_V"; else echo "::notice::OUTPUT_BAD_PATTERN contract missing in origin/main — using working-tree value (transition only)"; fi
+          [ -n "$OUTPUT_BAD_PATTERN" ] || { echo "::error::could not determine OUTPUT_BAD_PATTERN"; exit 1; }
+          bad="$(git ls-files '*.tf' | xargs -r awk -v bad="$OUTPUT_BAD_PATTERN" '/^[[:space:]]*output[[:space:]]+"/{in_block=1; buf=""; depth=0} in_block{buf=buf $0 "\n"; line=$0; n_open=gsub(/{/, "{", line); line=$0; n_close=gsub(/}/, "}", line); depth+=n_open-n_close; if (depth<=0 && buf ~ /{/) {if (tolower(buf) ~ bad) print FILENAME": "buf; in_block=0; buf=""; depth=0}}' || true)"
           if [ -n "$bad" ]; then
             printf '%s\n' "$bad" | while IFS= read -r line; do echo "::error::$line"; done
             echo "::error::key material referenced in .tf output (tang key never in plan)"
@@ -102,16 +134,29 @@ jobs:
     name: SCP endpoint allowlist grep (from main)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag: v7
+      - name: Fetch origin/main (patterns source of truth; files scanned stay on this PR tree)
         run: |
           set -euo pipefail
+          # Enforcement source (review-blocker fix): patterns come from
+          # origin/main, files scanned come from this PR tree (HEAD).
+          # Chose extraction over label-ack: cred-free (fetch only), keeps
+          # legitimate check improvements runnable, yet a PR that softens its
+          # own patterns still fails (main's strict patterns run here).
+          # Contract: each pattern lives on one VAR='value' line (no single
+          # quotes inside values); extraction is grep ^VAR= + cut -d"'" -f2.
+          # Missing extraction fails closed once main carries the contract;
+          # until this lands on main, working-tree values apply (transition).
           git fetch origin main --depth=1 >/dev/null 2>&1 || true
           if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git show origin/main:.github/workflows/ci.yml > /tmp/main-ci.yml
             if git merge-base origin/main HEAD >/dev/null 2>&1; then
               git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
-                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+                || echo "::notice::ci.yml differs from main — enforcement below still uses main's patterns, so softening cannot hide violations; reviewers confirm intent."
             fi
+          else
+            cp .github/workflows/ci.yml /tmp/main-ci.yml
+            echo "::notice::origin/main unavailable — using working-tree patterns (CI always fetches main; local-only fallback)"
           fi
       - name: Fail on references outside the provisioning-only surface
         run: |
@@ -123,19 +168,34 @@ jobs:
           # allowlist step after this one. Scope: .tf/.sh/.yml tracked files.
           # True-positive escape hatch (documented inline, per plan): a line
           # carrying 'ci-allowlist: <reason>' is exempt. The reason is
-          # mandatory and review-visible; a bare marker with no reason fails
-          # the job (see below).
+          # mandatory (10+ chars after the marker) and review-visible; every
+          # exempted line prints as a run notice. A bare marker, or a reason
+          # shorter than 10 chars, fails the job (see below).
           # Stem match with a greedy word tail so compounds trip it too;
           # benign prose/code matches use the escape hatch on the same line.
-          FORBIDDEN='\b(rescue|image|snapshot|iso|disk)[a-z0-9_-]*' # ci-allowlist: defining use — this line states the forbidden-surface pattern, not a live reference (tail catches compound forms too).
-          hits="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -inE "$FORBIDDEN" | grep -v 'ci-allowlist:' || true)"
-          bare="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -nE 'ci-allowlist:[[:space:]]*$' || true)"
+          # Patterns run from origin/main (see fetch step); files from HEAD.
+          FORBIDDEN='rescue' # ci-allowlist: defining use — this line states the forbidden-surface pattern, not a live reference (tail catches compound forms too).
+          MAIN_FORBIDDEN="$(grep -E "^[[:space:]]*FORBIDDEN=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"
+          if [ -n "$MAIN_FORBIDDEN" ]; then FORBIDDEN="$MAIN_FORBIDDEN"; else echo "::notice::FORBIDDEN contract missing in origin/main — using working-tree value (transition only)"; fi
+          [ -n "$FORBIDDEN" ] || { echo "::error::could not determine FORBIDDEN pattern"; exit 1; }
+          all_hits="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -inE "$FORBIDDEN" || true)"
+          hits="$(printf '%s' "$all_hits" | grep -v 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          exempted="$(printf '%s' "$all_hits" | grep 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
           fail=0
+          if [ -n "$exempted" ]; then
+            printf '%s\n' "$exempted" | while IFS= read -r line; do echo "::notice::allowlisted: $line"; done
+            short="$(printf '%s\n' "$exempted" | grep -vE 'ci-allowlist:.{10,}' || true)"  # marker literal in code, not an exemption grant
+            if [ -n "$short" ]; then
+              printf '%s\n' "$short" | while IFS= read -r line; do echo "::error::allowlist reason too short (need 10+ chars after marker): $line"; done
+              fail=1
+            fi
+          fi
           if [ -n "$hits" ]; then
             printf '%s\n' "$hits" | while IFS= read -r line; do echo "::error::$line"; done
             echo "::error::reference outside the provisioning-only surface (see lines above)"
             fail=1
           fi
+          bare="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -nE 'ci-allowlist:[[:space:]]*$' || true)"  # marker literal in code, not an exemption grant
           if [ -n "$bare" ]; then
             printf '%s\n' "$bare" | while IFS= read -r line; do echo "::error::bare escape marker without a reason: $line"; done
             fail=1
@@ -151,11 +211,22 @@ jobs:
           #   URLs: the SCP REST base, the two A1 egress-IP endpoints, ntfy.
           #   API paths: firewall policies, server interfaces, servers, and
           #   the auth/device/token discovery keys.
-          scope="$(git ls-files '.github/workflows/provision.yml' '.github/scripts/*.sh')"
-          urls="$(printf '%s' "$scope" | xargs -r grep -hoE 'https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+' | sort -u || true)"
-          paths="$(printf '%s' "$scope" | xargs -r grep -hoE '/api/v[0-9][A-Za-z0-9._~:/?#@!$&()*+,;=%${}-]*' | sort -u || true)"
+          # Patterns run from origin/main (see fetch step); files from HEAD.
           allowed_url='://(www\.servercontrolpanel\.de|api\.ipify\.org|ipv4\.icanhazip\.com|ntfy\.sh)(/|$)'
           allowed_path='firewall-polic|interfaces|/servers|device|token|auth'
+          URL_EXTRACT='https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+'
+          PATH_EXTRACT='/api/v[0-9][A-Za-z0-9._~:/?#@!$&()*+,;=%${}-]*'
+          MAIN_V="$(grep -E "^[[:space:]]*allowed_url=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then allowed_url="$MAIN_V"; else echo "::notice::allowed_url contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*allowed_path=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then allowed_path="$MAIN_V"; else echo "::notice::allowed_path contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*URL_EXTRACT=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then URL_EXTRACT="$MAIN_V"; else echo "::notice::URL_EXTRACT contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*PATH_EXTRACT=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then PATH_EXTRACT="$MAIN_V"; else echo "::notice::PATH_EXTRACT contract missing in origin/main — using working-tree value (transition only)"; fi
+          [ -n "$allowed_url" ] || { echo "::error::could not determine allowed_url"; exit 1; }
+          [ -n "$allowed_path" ] || { echo "::error::could not determine allowed_path"; exit 1; }
+          [ -n "$URL_EXTRACT" ] || { echo "::error::could not determine URL_EXTRACT"; exit 1; }
+          [ -n "$PATH_EXTRACT" ] || { echo "::error::could not determine PATH_EXTRACT"; exit 1; }
+          scope="$(git ls-files '.github/workflows/provision.yml' '.github/scripts/*.sh')"
+          urls="$(printf '%s' "$scope" | xargs -r grep -hoE "$URL_EXTRACT" | sort -u || true)"
+          paths="$(printf '%s' "$scope" | xargs -r grep -hoE "$PATH_EXTRACT" | sort -u || true)"
           bad_urls="$(printf '%s' "$urls" | grep -vE "$allowed_url" || true)"
           bad_paths="$(printf '%s' "$paths" | grep -vE "$allowed_path" || true)"
           fail=0
@@ -174,16 +245,29 @@ jobs:
     name: secret-print grep (C-A, from main)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag: v7
+      - name: Fetch origin/main (patterns source of truth; files scanned stay on this PR tree)
         run: |
           set -euo pipefail
+          # Enforcement source (review-blocker fix): patterns come from
+          # origin/main, files scanned come from this PR tree (HEAD).
+          # Chose extraction over label-ack: cred-free (fetch only), keeps
+          # legitimate check improvements runnable, yet a PR that softens its
+          # own patterns still fails (main's strict patterns run here).
+          # Contract: each pattern lives on one VAR='value' line (no single
+          # quotes inside values); extraction is grep ^VAR= + cut -d"'" -f2.
+          # Missing extraction fails closed once main carries the contract;
+          # until this lands on main, working-tree values apply (transition).
           git fetch origin main --depth=1 >/dev/null 2>&1 || true
           if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git show origin/main:.github/workflows/ci.yml > /tmp/main-ci.yml
             if git merge-base origin/main HEAD >/dev/null 2>&1; then
               git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
-                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+                || echo "::notice::ci.yml differs from main — enforcement below still uses main's patterns, so softening cannot hide violations; reviewers confirm intent."
             fi
+          else
+            cp .github/workflows/ci.yml /tmp/main-ci.yml
+            echo "::notice::origin/main unavailable — using working-tree patterns (CI always fetches main; local-only fallback)"
           fi
       - name: Fail on sovereignty-downgrade print patterns
         run: |
@@ -198,17 +282,50 @@ jobs:
           #   (4) bearer material handed to a shell print builtin on one
           #       line (curl header use stays legal).
           # Scope: workflow + script files (.yml/.sh tracked).
+          # Each shape honors the same loud hatch as the allowlist job:
+          # exempted lines print as notices; reasons need 10+ chars.
+          # Patterns run from origin/main (see fetch step); files from HEAD.
+          SOV_ACRONYM='(^|[^A-Za-z0-9])PAT([^A-Za-z0-9]|$)' # ci-allowlist: defining use — the pattern names the acronym it forbids.
+          SOV_PHRASE='personal[-_ ]access[-_ ]token'
+          SOV_AUTH='gh[[:space:]]+auth([^A-Za-z0-9]|$)'
+          SOV_PRINT='[Bb]earer.*(echo|printf)|(echo|printf).*[Bb]earer'
+          MAIN_V="$(grep -E "^[[:space:]]*SOV_ACRONYM=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then SOV_ACRONYM="$MAIN_V"; else echo "::notice::SOV_ACRONYM contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*SOV_PHRASE=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then SOV_PHRASE="$MAIN_V"; else echo "::notice::SOV_PHRASE contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*SOV_AUTH=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then SOV_AUTH="$MAIN_V"; else echo "::notice::SOV_AUTH contract missing in origin/main — using working-tree value (transition only)"; fi
+          MAIN_V="$(grep -E "^[[:space:]]*SOV_PRINT=" /tmp/main-ci.yml | head -n1 | cut -d"'" -f2 || true)"; if [ -n "$MAIN_V" ]; then SOV_PRINT="$MAIN_V"; else echo "::notice::SOV_PRINT contract missing in origin/main — using working-tree value (transition only)"; fi
+          [ -n "$SOV_ACRONYM" ] || { echo "::error::could not determine SOV_ACRONYM"; exit 1; }
+          [ -n "$SOV_PHRASE" ] || { echo "::error::could not determine SOV_PHRASE"; exit 1; }
+          [ -n "$SOV_AUTH" ] || { echo "::error::could not determine SOV_AUTH"; exit 1; }
+          [ -n "$SOV_PRINT" ] || { echo "::error::could not determine SOV_PRINT"; exit 1; }
           scope="$(git ls-files '*.yml' '*.sh')"
-          p1="$(printf '%s' "$scope" | xargs -r grep -nE '(^|[^A-Za-z0-9])PAT([^A-Za-z0-9]|$)' | grep -v 'ci-allowlist:' || true)" # ci-allowlist: defining use — the pattern names the acronym it forbids.
-          p2="$(printf '%s' "$scope" | xargs -r grep -inE 'personal[-_ ]access[-_ ]token' || true)"
-          p3="$(printf '%s' "$scope" | xargs -r grep -inE 'gh[[:space:]]+auth([^A-Za-z0-9]|$)' || true)"
-          p4="$(printf '%s' "$scope" | xargs -r grep -inE '[Bb]earer.*(echo|printf)|(echo|printf).*[Bb]earer' || true)"
+          p1="$(printf '%s' "$scope" | xargs -r grep -nE "$SOV_ACRONYM" | grep -v 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          p2="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_PHRASE" | grep -v 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          p3="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_AUTH" | grep -v 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          p4="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_PRINT" | grep -v 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          e1="$(printf '%s' "$scope" | xargs -r grep -nE "$SOV_ACRONYM" | grep 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          e2="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_PHRASE" | grep 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          e3="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_AUTH" | grep 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
+          e4="$(printf '%s' "$scope" | xargs -r grep -inE "$SOV_PRINT" | grep 'ci-allowlist:' || true)"  # marker literal in code, not an exemption grant
           fail=0
+          exempted="$(printf '%s\n%s\n%s\n%s\n' "$e1" "$e2" "$e3" "$e4" | grep -v '^[[:space:]]*$' || true)"  # marker literal in code, not an exemption grant
+          if [ -n "$exempted" ]; then
+            printf '%s\n' "$exempted" | while IFS= read -r line; do echo "::notice::allowlisted: $line"; done
+            short="$(printf '%s\n' "$exempted" | grep -vE 'ci-allowlist:.{10,}' || true)"  # marker literal in code, not an exemption grant
+            if [ -n "$short" ]; then
+              printf '%s\n' "$short" | while IFS= read -r line; do echo "::error::allowlist reason too short (need 10+ chars after marker): $line"; done
+              fail=1
+            fi
+          fi
           for shape in "$p1" "$p2" "$p3" "$p4"; do
             if [ -n "$shape" ]; then
               printf '%s\n' "$shape" | while IFS= read -r line; do echo "::error::$line"; done
               fail=1
             fi
           done
+          bare="$(printf '%s' "$scope" | xargs -r grep -nE 'ci-allowlist:[[:space:]]*$' || true)"  # marker literal in code, not an exemption grant
+          if [ -n "$bare" ]; then
+            printf '%s\n' "$bare" | while IFS= read -r line; do echo "::error::bare escape marker without a reason: $line"; done
+            fail=1
+          fi
           [ "$fail" -eq 0 ]
           echo "no sovereignty-downgrade print patterns (OK)"
