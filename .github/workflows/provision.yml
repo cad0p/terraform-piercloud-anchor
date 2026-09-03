@@ -1,13 +1,10 @@
 # .github/workflows/provision.yml — v0.2 phone-first provisioning (M1 skeleton).
 #
-# Plan milestone M1 (SPEC step 2): four modes + S1 device-flow job (C-a..C-f) +
-# static global mutex + SHA-pinned actions + alias-only inputs + repo-secret
-# identifiers + C-E LOUD banner + H1 thumbprint artifact.
-#
-# SCOPE: skeleton only. The A1 window + CI-called entrypoint land in M2;
-# TODO(M2) markers below show exactly where that wiring lands. This file
-# deliberately references no other new path, so main never holds a workflow
-# pointing at a nonexistent path.
+# Plan milestone M2 (SPEC step 3): A1 hardened window + CI-called entrypoint
+# `.github/scripts/020-provision-anchor.sh` (sweep-pre / open / provision /
+# close / sweep-post) + same-job ephemeral-token handoff + stateless tofu
+# apply. M1 skeleton properties (SHA pins, mutex, C-E banner, H1 artifact)
+# are unchanged.
 #
 # M0 live-evidence (real netcup device-flow drill on a phone) gates done-ness,
 # NOT this scaffolding — M0-pending, recorded in the PR body.
@@ -48,6 +45,11 @@ on:
         description: "update-ip: old IPv4 source to remove AFTER confirmed boot."
         required: false
         type: string
+      rotate_keys:
+        description: "apply: forward --rotate to the on-box provision step (tang-key rotation)."
+        required: false
+        default: false
+        type: boolean
 
 # Static global mutex: one mutex serializes ALL tenants' policy mutations.
 # Static literal — dynamic values are FORBIDDEN in concurrency.group.
@@ -134,9 +136,11 @@ jobs:
           # acknowledge-checkbox on the no-account path (open design Q5).
 
   device-flow:
-    name: "S1 device-flow (C-a..C-f)"
+    name: "S1 device-flow (C-a..C-f) + A1 window + stateless apply"
     runs-on: ubuntu-latest
     needs: [visibility-banner]
+    outputs:
+      thumbprint: ${{ steps.a1-provision.outputs.thumbprint }}
     env:
       # Identifiers resolve from REPO-level secrets inside runs (C-E) —
       # never dispatch inputs, never logs (values are write-only, log-masked).
@@ -146,6 +150,15 @@ jobs:
       NETCUP_OIDC_DISCOVERY_URL: ${{ secrets.NETCUP_OIDC_DISCOVERY_URL }}
       SERVER_ALIAS: ${{ inputs.server_alias }}
     steps:
+      - name: Checkout (no credentials persisted)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # SHA pin of checkout v7
+        with:
+          persist-credentials: false
+          # M2: the A1 entrypoint lives in this repo
+          # (.github/scripts/020-provision-anchor.sh) — the device-flow job
+          # must check it out to call it (full checkout: tofu below needs
+          # the module files too).
+
       - name: Device authorization + poll (ephemeral token dies with runner)
         id: device
         run: |
@@ -193,8 +206,13 @@ jobs:
                 ACCESS_TOKEN="$(echo "$POLL" | jq -r '.access_token')"
                 echo "::add-mask::$ACCESS_TOKEN"
                 echo "authorized=true" >> "$GITHUB_OUTPUT"
-                # C-d: refresh stays in-memory only (same-runner handoff in
-                # M2); TF 1.11 ephemerals carry it — it never lands in state.
+                # M2 same-job handoff: the token persists ONLY in this
+                # runner's environment (GITHUB_ENV dies with the runner).
+                # Same-job steps below consume it; it never crosses jobs,
+                # never lands in state (C-d: TF 1.11 ephemerals carry it).
+                echo "NETCUP_SCP_ACCESS_TOKEN=$ACCESS_TOKEN" >> "$GITHUB_ENV"
+                # C-d: refresh stays in-memory only (same-runner handoff
+                # above); TF 1.11 ephemerals carry it — it never lands in state.
                 echo "Approved. Token held in runner memory only."
                 exit 0
                 ;;
@@ -219,9 +237,149 @@ jobs:
           done
           echo "::error::approval window (~570s) elapsed without approval. Re-dispatch the workflow for a fresh code."
           exit 1
-          # TODO(M2): same-job handoff of the in-memory token to the tofu
-          # steps below (ephemeral exchange → data-source resolve →
-          # conditional import → plan → apply); state dies with the runner.
+          # M2: same-job handoff implemented above (token -> GITHUB_ENV);
+          # the A1 + tofu steps below consume it on this same runner.
+
+      - name: A1 pre-sweep (surplus fail-closed, every run, all modes)
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          SERVER_ID: ${{ secrets.NETCUP_SERVER_ID }}
+          SCP_USER_ID: ${{ secrets.NETCUP_SCP_USER_ID }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # TTL tag piercloud-tmp-<server_id>-<run_id>, description
+          # created_at=<RFC3339-UTC> purpose=A1-ssh. >1 tmp on this server,
+          # or any tmp >2h / orphan at pre-step, fails BEFORE creating
+          # (exit 3, operator notified by the failure step below).
+          .github/scripts/020-provision-anchor.sh sweep-pre
+
+      - name: Set up OpenTofu (>= 1.11 for ephemeral values)
+        if: inputs.mode == 'apply'
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # SHA pin of setup-opentofu v2
+        with:
+          tofu_version: "1.12.2"
+
+      - name: tofu init (stateless — local state dies with the runner)
+        if: inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          TF_IN_AUTOMATION: "true"
+        run: |
+          set -euo pipefail
+          # No backend block: local state file on the ephemeral runner.
+          # Nothing persists past this run by construction.
+          tofu init -input=false
+
+      - name: tofu plan (ephemeral token, never state)
+        if: inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          TF_IN_AUTOMATION: "true"
+          TF_VAR_hostname: ${{ secrets.NETCUP_HOSTNAME }}
+          TF_VAR_server_id: ${{ secrets.NETCUP_SERVER_ID }}
+          TF_VAR_scp_user_id: ${{ secrets.NETCUP_SCP_USER_ID }}
+          TF_VAR_customer_number: ${{ secrets.NETCUP_CUSTOMER_NUMBER }}
+          TF_VAR_allow_main_box_ipv4: ${{ secrets.NETCUP_MAIN_BOX_IPV4 }}
+        run: |
+          set -euo pipefail
+          # New secret names introduced in M2 (repo secrets, never committed):
+          # NETCUP_SERVER_ID, NETCUP_MAIN_BOX_IPV4, NETCUP_ANCHOR_IPV4,
+          # A1_ROOT_PASSWORD (masked one-run input, dead after root lock),
+          # A1_SSH_PUBKEY_1 / A1_SSH_PUBKEY_2 (mandated 2 keys at A1).
+          tofu plan -input=false -out=tfplan
+
+      - name: A1 open (TTL-tagged single-/32 window)
+        id: a1-open
+        if: inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          SERVER_ID: ${{ secrets.NETCUP_SERVER_ID }}
+          SCP_USER_ID: ${{ secrets.NETCUP_SCP_USER_ID }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Dual-endpoint egress-IP pin (exact match or fail) + idempotent
+          # create on run_id + attach — all under the static global mutex
+          # above (one mutex serializes every tenant's policy mutations).
+          .github/scripts/020-provision-anchor.sh open
+
+      - name: tofu apply (steady-state policy, then hand off to A1 ssh)
+        if: inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          TF_IN_AUTOMATION: "true"
+          TF_VAR_hostname: ${{ secrets.NETCUP_HOSTNAME }}
+          TF_VAR_server_id: ${{ secrets.NETCUP_SERVER_ID }}
+          TF_VAR_scp_user_id: ${{ secrets.NETCUP_SCP_USER_ID }}
+          TF_VAR_customer_number: ${{ secrets.NETCUP_CUSTOMER_NUMBER }}
+          TF_VAR_allow_main_box_ipv4: ${{ secrets.NETCUP_MAIN_BOX_IPV4 }}
+        run: |
+          set -euo pipefail
+          tofu apply -input=false -auto-approve tfplan
+
+      - name: A1 provision (plain ssh, thumbprint, root lock)
+        id: a1-provision
+        if: inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          SERVER_ID: ${{ secrets.NETCUP_SERVER_ID }}
+          SCP_USER_ID: ${{ secrets.NETCUP_SCP_USER_ID }}
+          RUN_ID: ${{ github.run_id }}
+          ANCHOR_HOST: ${{ secrets.NETCUP_ANCHOR_IPV4 }}
+          PINNED_IP: ${{ steps.a1-open.outputs.pinned_ip }}
+          ROOT_PASSWORD: ${{ secrets.A1_ROOT_PASSWORD }}
+          A1_SSH_PUBKEY_1: ${{ secrets.A1_SSH_PUBKEY_1 }}
+          A1_SSH_PUBKEY_2: ${{ secrets.A1_SSH_PUBKEY_2 }}
+          THUMBPRINT_FILE: thumbprint.txt
+        run: |
+          set -euo pipefail
+          # Pre-SSH IP re-fetch (mismatch aborts to sweep inside the script);
+          # emailed root password arrives as a masked one-run input and is
+          # never printed; the script ends with `passwd -l root`.
+          ARGS=""
+          if [ "${{ inputs.rotate_keys }}" = "true" ]; then ARGS="--rotate"; fi
+          # shellcheck disable=SC2086: ARGS is empty-or-one-known-flag by construction.
+          .github/scripts/020-provision-anchor.sh $ARGS provision
+
+      - name: A1 close (detach-then-delete, always)
+        if: always() && steps.device.outputs.authorized == 'true' && inputs.mode == 'apply'
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          SERVER_ID: ${{ secrets.NETCUP_SERVER_ID }}
+          SCP_USER_ID: ${{ secrets.NETCUP_SCP_USER_ID }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          .github/scripts/020-provision-anchor.sh close
+
+      - name: A1 post-sweep (always, every run, all modes)
+        if: always()
+        env:
+          NETCUP_SCP_ACCESS_TOKEN: ${{ env.NETCUP_SCP_ACCESS_TOKEN }}
+          SERVER_ID: ${{ secrets.NETCUP_SERVER_ID }}
+          SCP_USER_ID: ${{ secrets.NETCUP_SCP_USER_ID }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Sweeps this run's policy at any age + every tmp >2h + orphans.
+          # No token (approval never completed) = clean no-op, so this step
+          # never masks the original failure.
+          .github/scripts/020-provision-anchor.sh sweep-post
+
+      - name: Notify operator on failure (surplus/orphan hint)
+        if: failure()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "NTFY_TOPIC unset — failure stays in the run summary."
+            exit 0
+          fi
+          MSG="piercloud A1/provision FAILED for ${{ inputs.server_alias }} — run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. If the log shows SURPLUS_FAIL_CLOSED, >1 tmp policies or a >2h tmp exist on the server: clean up by hand, then re-dispatch. Nothing was created by the failed step."
+          curl -sS -u ":$NTFY_TOKEN" -d "$MSG" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null
 
   apply-placeholder:
     name: "mode=apply (stateless skeleton)"
@@ -237,13 +395,15 @@ jobs:
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # SHA pin of setup-opentofu v2
         with:
           tofu_version: "1.12.2"
-      # TODO(M2): ephemeral exchange → data-source resolve → conditional
-      # import (for_each, empty = zero) → plan → apply → state dies with the
-      # runner. Policy name: piercloud-tang-${hostname}-${server_id}.
-      - name: Skeleton marker (M2 wires the real steps)
+      # M2: the real path (ephemeral exchange → data-source resolve →
+      # plan → apply → state dies with the runner; policy name
+      # piercloud-tang-${hostname}-${server_id} lands fully in M3) now runs
+      # in the device-flow job on the SAME runner (token never crosses
+      # jobs). This job stays a mode-scope marker.
+      - name: Mode marker (real steps run in the device-flow job)
         run: |
           set -euo pipefail
-          echo "mode=apply skeleton for alias '${{ inputs.server_alias }}' (device-flow approval already recorded this run). Real tofu steps land in M2."
+          echo "mode=apply for alias '${{ inputs.server_alias }}': tofu plan/apply + A1 window + ssh provision run in the device-flow job (same-runner token handoff)."
 
   check-hygiene:
     name: "mode=check (drift + hygiene skeleton)"
@@ -309,17 +469,26 @@ jobs:
   thumbprint:
     name: "H1 thumbprint chain (artifact)"
     runs-on: ubuntu-latest
-    needs: [apply-placeholder]
+    needs: [device-flow]
     if: inputs.mode == 'apply'
     steps:
       - name: Checkout (no credentials persisted)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # SHA pin of checkout v7
         with:
           persist-credentials: false
-      - name: Skeleton thumbprint file (M2 fills the real value)
+      - name: Write thumbprint captured by the A1 provision step
+        env:
+          THUMBPRINT: ${{ needs.device-flow.outputs.thumbprint }}
         run: |
           set -euo pipefail
-          echo "M1 skeleton placeholder — real tang thumbprint lands here in M2 (never logs alone, H1)." > thumbprint.txt
+          # The tang thumbprint is public (goes to the password manager +
+          # committed break-glass file + ntfy) — safe to carry as a job
+          # output, unlike the token (which never crosses jobs).
+          if [ -z "$THUMBPRINT" ]; then
+            echo "::error::no thumbprint captured — the A1 provision step did not report one. Refusing to publish an empty artifact (H1: never logs alone)."
+            exit 1
+          fi
+          printf '%s\n' "$THUMBPRINT" > thumbprint.txt
           echo "alias=${{ inputs.server_alias }} head=${{ github.sha }}" >> thumbprint.txt
       - name: Upload thumbprint artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # SHA pin of upload-artifact v4
