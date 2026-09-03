@@ -21,9 +21,8 @@ Related: [dr.md](dr.md) (DR table, decision tree, day-1 checklist) ·
 
 ## 1. Order the anchor ("piko"-class VPS)
 
-In the netcup SCP (web UI, TOTP 2FA), order a small VPS (a
-1 vCore / 1 GB "piko", ~€1.90/mo VAT-incl, 12-mo term, is plenty for tang +
-Gatus), official Debian-family image, root password by email. Note:
+In the netcup SCP (web UI, TOTP 2FA), order a small VPS — the [VPS pico G11s](https://www.netcup.com/en/server/vps/vps-pico-g11s-iv-12m-nue) (~€1.90/mo VAT-incl, 12-mo term, Nürnberg) is plenty for tang +
+Gatus. Official Debian-family image, root password by email. Do NOT apply a welcome voucher: pico products can't be combined with vouchers (the voucher exceeds the cart minimum), so the order won't submit. Note:
 
 - the **server name** (e.g. `SCPI-1234567`) or numeric **server id**,
 - the **user id** of your SCP account (Account → Users),

@@ -50,8 +50,10 @@ via netcup SCP at order time.
 
 Every step below runs from any browser — laptop or phone; phone browsers work for the whole flow, including the approval tap.
 
-1. **Order the anchor** — in the netcup SCP: a small VPS ("piko" class is
-   plenty), any Debian-family image, root password by email. Anchor IPv4
+1. **Order the anchor** — in the netcup SCP: the [VPS pico G11s](https://www.netcup.com/en/server/vps/vps-pico-g11s-iv-12m-nue)
+   (~€1.90/mo VAT-incl, 12-mo term) is plenty; any Debian-family image,
+   root password by email. Skip the welcome voucher (pico can't be combined
+   with vouchers — the order won't submit). Anchor IPv4
    is REQUIRED (runners have no IPv6; v6-only unsupported). Note the
    server name (or id), your SCP user id, and the anchor's IP.
    *(docs/usage.md §1)*
