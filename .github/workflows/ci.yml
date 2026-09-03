@@ -16,7 +16,7 @@ jobs:
     name: tofu fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
@@ -27,7 +27,7 @@ jobs:
     name: tofu validate (cred-free)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
@@ -45,7 +45,7 @@ jobs:
     name: key-material grep
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fail if private key material appears in tracked code files
         run: |
           set -euo pipefail
