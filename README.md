@@ -58,37 +58,37 @@ Every step below runs from any browser — laptop or phone; phone browsers work 
    invoice check). Anchor IPv4
    is REQUIRED (runners have no IPv6; v6-only unsupported). Note the
    server name (or id), your SCP user id, and the anchor's IP.
-   *(docs/usage.md §1)*
+   *(details: [walkthrough §1](docs/usage.md#1-order-the-anchor-piko-class-vps))*
 2. **Repo from template + repo secrets** — "Use this template", then set
    REPO-level secrets with the identifiers only (hostname, IPs,
    `scp_user_id`, customer number). No stored netcup secrets of any kind:
    every run authenticates via your per-run approval. Public default once
    secrets land (values stay write-only, log-masked, invisible to forks).
-   *(docs/usage.md §2)*
+   *(details: [walkthrough §2](docs/usage.md#2-repo-from-template--repo-secrets-c-e-visibility-rule))*
 3. **Dispatch + approve** — Actions → [`provision.yml`](.github/workflows/provision.yml)
    `mode=apply` (only `server_alias` in the inputs) →
    approve the device-flow URL + code at netcup's own Keycloak, from any browser. The
-   ephemeral token dies with the runner. *(docs/usage.md §3)*
+   ephemeral token dies with the runner. *(details: [walkthrough §3](docs/usage.md#3-dispatch-and-approve-s1))*
 4. **A1 provisions** — the run opens its own /32 window, installs `tang`,
    prints its **thumbprint** (to ntfy + run artifact + committed
    break-glass file — never logs alone), installs the Gatus monitor, and
    ends with `passwd -l root`. **Save the thumbprint in your password
    manager NOW**, then finish the
    [day-1 checklist](docs/dr.md#day-1-off-device-checklist).
-   *(docs/usage.md §4)*
+   *(details: [walkthrough §4](docs/usage.md#4-a1-provisions-thumbprint-lands-three-ways-h1-chain))*
 5. **Configure the monitor** — one file on the anchor:
    `/etc/gatus/config.yaml`. Pick an alerting channel (ntfy / Telegram /
    SMTP) and add endpoints for **your main server's services by DNS name**.
-   *(docs/usage.md §5 in the full walkthrough)*
+   *(installed by the run — [walkthrough §4](docs/usage.md#4-a1-provisions-thumbprint-lands-three-ways-h1-chain); configure per the file's own comments)*
 6. **Bind your main box** — install `clevis clevis-luks clevis-initramfs`,
    run the printed `clevis luks bind` command against the DNS name
    (`tang-<user>.piercloud.net`), confirming the thumbprint matches
    out-of-band — never `-y` blind — then rebuild the initramfs.
-   *(docs/usage.md §5)*
+   *(details: [walkthrough §5](docs/usage.md#5-bind-your-main-box-clevis))*
 7. **Reboot-test twice + monthly one-tap check.** The unlock prompt may
    flash, then continue on its own when clevis reaches the anchor. That is
    success. Keep the passphrase keyslot forever — it is the true root.
-   `mode=check` monthly is hygiene, not load-bearing. *(docs/usage.md §6,
+   `mode=check` monthly is hygiene, not load-bearing. *([walkthrough §6](docs/usage.md#6-monthly-one-tap-modecheck-hygiene-not-load-bearing),
    docs/dr.md)*
 
 ## Quickstart
