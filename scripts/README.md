@@ -6,8 +6,13 @@ Every script in this directory follows the same invariants:
    pcad.it-infra house convention), ordered by execution phase. Numbers are
    never reused; new scripts take the next free number.
 2. **Human-run.** Scripts run ON the target box, started by a human (netcup
-   SCP remote console or your own SSH session). Nothing in this repo connects
-   to your boxes; there is no automation host, no agent, no SSH inbound.
+   SCP remote console or your own SSH session). Nothing in *this directory*
+   connects to your boxes: no automation host, no agent, no SSH inbound
+   from these files. API-touching CI workflows (`.github/workflows/` +
+   CI-called `.github/scripts/`, below) coexist with these human-run
+   on-box scripts as the deliberate exception — and the invariant holds:
+   no repo automation holds credentials to user boxes outside the per-run
+   device-flow (the token dies with the runner).
 3. **Idempotent.** Safe to re-run at any time, on any state — re-running must
    converge, never break.
 4. **Verify live twice.** After first provision, re-run the script from the
