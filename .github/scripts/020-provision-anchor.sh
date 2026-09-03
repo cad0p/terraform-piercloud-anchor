@@ -42,7 +42,7 @@
 #                            the workflow step before use (plus repo-secret
 #                            auto-mask); referenced here ONLY as
 #                            the sshpass environment value — never echoed,
-#                            never logged, never written to disk.
+#                            never logged, never written to disk. # ci-allowlist: prose — on-box credential-hygiene note, not a live storage reference.
 #   A1_SSH_PUBKEY_1/2        the mandated 2 SSH keys installed at A1.
 #   THUMBPRINT_FILE          artifact path for the captured tang thumbprint
 #                            (default ./thumbprint.txt; the value is public).

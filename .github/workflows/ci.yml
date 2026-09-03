@@ -46,6 +46,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1 >/dev/null 2>&1 || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            if git merge-base origin/main HEAD >/dev/null 2>&1; then
+              git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
+                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+            fi
+          fi
       - name: Fail if private key material appears in tracked code files
         run: |
           set -euo pipefail
@@ -73,3 +83,132 @@ jobs:
             exit 1
           fi
           echo "No private key material in tracked code files (OK)"
+
+      - name: Fail if any .tf output exposes key material (tang key never in plan)
+        run: |
+          set -euo pipefail
+          # Invariant: the tang key never appears in state/plan output. No
+          # .tf output block may reference JWK or private-key shapes. The
+          # tang thumbprint stays legal (public by design, H1).
+          bad="$(git ls-files '*.tf' | xargs -r awk '/^[[:space:]]*output[[:space:]]+"/{in_block=1} in_block{buf=buf $0 "\n"} /^[[:space:]]*}[[:space:]]*$/{if (in_block && tolower(buf) ~ /jwk|private_key|private-key/) print FILENAME": "buf; in_block=0; buf=""}' || true)"
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad" | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::error::key material referenced in .tf output (tang key never in plan)"
+            exit 1
+          fi
+          echo "No key material in .tf outputs (OK)"
+
+  scp-endpoint-allowlist:
+    name: SCP endpoint allowlist grep (from main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1 >/dev/null 2>&1 || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            if git merge-base origin/main HEAD >/dev/null 2>&1; then
+              git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
+                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+            fi
+          fi
+      - name: Fail on references outside the provisioning-only surface
+        run: |
+          set -euo pipefail
+          # Anchor invariant: the tracked workflow/script/module surface is
+          # provisioning-only (firewall policies, interfaces, servers, auth
+          # flows). The exact forbidden surface lives in the FORBIDDEN
+          # pattern line below; the permitted endpoint set lives in the
+          # allowlist step after this one. Scope: .tf/.sh/.yml tracked files.
+          # True-positive escape hatch (documented inline, per plan): a line
+          # carrying 'ci-allowlist: <reason>' is exempt. The reason is
+          # mandatory and review-visible; a bare marker with no reason fails
+          # the job (see below).
+          # Stem match with a greedy word tail so compounds trip it too;
+          # benign prose/code matches use the escape hatch on the same line.
+          FORBIDDEN='\b(rescue|image|snapshot|iso|disk)[a-z0-9_-]*' # ci-allowlist: defining use — this line states the forbidden-surface pattern, not a live reference (tail catches compound forms too).
+          hits="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -inE "$FORBIDDEN" | grep -v 'ci-allowlist:' || true)"
+          bare="$(git ls-files '*.tf' '*.sh' '*.yml' | xargs -r grep -nE 'ci-allowlist:[[:space:]]*$' || true)"
+          fail=0
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits" | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::error::reference outside the provisioning-only surface (see lines above)"
+            fail=1
+          fi
+          if [ -n "$bare" ]; then
+            printf '%s\n' "$bare" | while IFS= read -r line; do echo "::error::bare escape marker without a reason: $line"; done
+            fail=1
+          fi
+          [ "$fail" -eq 0 ]
+          echo "provisioning-only surface holds (OK)"
+      - name: Fail on anything netcup-shaped outside the allowlist
+        run: |
+          set -euo pipefail
+          # Allowlist approach: enumerate the permitted endpoint substrings
+          # and fail on anything else netcup-shaped in the CI-called surface
+          # (provision.yml + .github/scripts). Permitted today:
+          #   URLs: the SCP REST base, the two A1 egress-IP endpoints, ntfy.
+          #   API paths: firewall policies, server interfaces, servers, and
+          #   the auth/device/token discovery keys.
+          scope="$(git ls-files '.github/workflows/provision.yml' '.github/scripts/*.sh')"
+          urls="$(printf '%s' "$scope" | xargs -r grep -hoE 'https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+' | sort -u || true)"
+          paths="$(printf '%s' "$scope" | xargs -r grep -hoE '/api/v[0-9][A-Za-z0-9._~:/?#@!$&()*+,;=%${}-]*' | sort -u || true)"
+          allowed_url='://(www\.servercontrolpanel\.de|api\.ipify\.org|ipv4\.icanhazip\.com|ntfy\.sh)(/|$)'
+          allowed_path='firewall-polic|interfaces|/servers|device|token|auth'
+          bad_urls="$(printf '%s' "$urls" | grep -vE "$allowed_url" || true)"
+          bad_paths="$(printf '%s' "$paths" | grep -vE "$allowed_path" || true)"
+          fail=0
+          if [ -n "$bad_urls" ]; then
+            printf '%s\n' "$bad_urls" | while IFS= read -r line; do echo "::error::unlisted URL in CI-called surface: $line"; done
+            fail=1
+          fi
+          if [ -n "$bad_paths" ]; then
+            printf '%s\n' "$bad_paths" | while IFS= read -r line; do echo "::error::unlisted API path in CI-called surface: $line"; done
+            fail=1
+          fi
+          [ "$fail" -eq 0 ]
+          echo "endpoint allowlist holds (OK)"
+
+  pat-print-grep:
+    name: secret-print grep (C-A, from main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch main (from-main guard — a PR cannot weaken its own checks unnoticed)
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1 >/dev/null 2>&1 || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            if git merge-base origin/main HEAD >/dev/null 2>&1; then
+              git diff --quiet origin/main...HEAD -- .github/workflows/ci.yml \
+                || echo "::notice::ci.yml differs from main — reviewers: confirm the grep jobs were not weakened. The same jobs re-run on push to main."
+            fi
+          fi
+      - name: Fail on sovereignty-downgrade print patterns
+        run: |
+          set -euo pipefail
+          # C-A: no sovereignty-downgrade fallback, ever. Any one-run
+          # credential printed or dumped is a review blocker. Four shapes:
+          #   (1) the bounded uppercase acronym — covers underscore-joined
+          #       names and the bare word, while dispatch/path/compare-style
+          #       substrings stay green;
+          #   (2) the personal-token phrase in any common spelling;
+          #   (3) any CLI auth-subcommand invocation (see the pattern line);
+          #   (4) bearer material handed to a shell print builtin on one
+          #       line (curl header use stays legal).
+          # Scope: workflow + script files (.yml/.sh tracked).
+          scope="$(git ls-files '*.yml' '*.sh')"
+          p1="$(printf '%s' "$scope" | xargs -r grep -nE '(^|[^A-Za-z0-9])PAT([^A-Za-z0-9]|$)' | grep -v 'ci-allowlist:' || true)" # ci-allowlist: defining use — the pattern names the acronym it forbids.
+          p2="$(printf '%s' "$scope" | xargs -r grep -inE 'personal[-_ ]access[-_ ]token' || true)"
+          p3="$(printf '%s' "$scope" | xargs -r grep -inE 'gh[[:space:]]+auth([^A-Za-z0-9]|$)' || true)"
+          p4="$(printf '%s' "$scope" | xargs -r grep -inE '[Bb]earer.*(echo|printf)|(echo|printf).*[Bb]earer' || true)"
+          fail=0
+          for shape in "$p1" "$p2" "$p3" "$p4"; do
+            if [ -n "$shape" ]; then
+              printf '%s\n' "$shape" | while IFS= read -r line; do echo "::error::$line"; done
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ]
+          echo "no sovereignty-downgrade print patterns (OK)"

@@ -64,6 +64,9 @@ jobs:
   visibility-banner:
     name: "C-E visibility banner (LOUD on change)"
     runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.banner.outputs.head_full }}
+      head_short: ${{ steps.banner.outputs.head_short }}
     steps:
       - name: Checkout (no credentials persisted)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # SHA pin of checkout v7
@@ -109,6 +112,29 @@ jobs:
           # actions:read (backend mechanics, open design Q4); failed check =
           # no apply, always (C-A). Red-banner acknowledge-checkbox UX for the
           # no-account path also lands with the notifier wiring.
+
+      - name: Record head SHA for the backend approval pin
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          HEAD_SHORT: ${{ steps.banner.outputs.head_short }}
+          SERVER_ALIAS: ${{ inputs.server_alias }}
+        run: |
+          set -euo pipefail
+          # Template side of the head_sha approval pin (open design Q4): the
+          # run publishes the dispatched head SHA as job outputs (see the
+          # outputs block above) AND as a machine-readable artifact, so the
+          # future backend can record the last-approved head via
+          # actions:read. Failed check = no apply, always. Backend mechanics
+          # themselves are out of scope for v0.2.
+          printf 'head_sha=%s head_short=%s alias=%s\n' "$HEAD_SHA" "$HEAD_SHORT" "$SERVER_ALIAS" > head-sha.txt
+      - name: Upload head-SHA artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # SHA pin of upload-artifact v4
+        with:
+          name: head-sha-${{ inputs.server_alias }}
+          path: head-sha.txt
+          # Same horizon as the thumbprint artifact: audit trail, not logs.
+          retention-days: 400
+          if-no-files-found: error
 
       - name: ntfy verdict (verbatim strings)
         env:

@@ -1,7 +1,7 @@
 # Adopt an existing netcup server and turn it into a tang/clevis NBDE anchor.
 #
 # Prerequisites:
-#   - a netcup server ordered in the SCP (any Debian-family image installed)
+#   - a netcup server ordered in the SCP (any Debian-family image installed) # ci-allowlist: prose — install-time OS wording, not a live image-install reference.
 #   - SCP API credentials in the environment (NETCUP_* — see ../../docs/usage.md)
 #   - your main box's public IP(s)
 #
