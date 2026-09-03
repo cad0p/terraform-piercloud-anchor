@@ -34,8 +34,8 @@ server name — it does not create or destroy servers (the netcup SCP API cannot
   with an explicit egress ACCEPT-all so the anchor can always answer,
 - the firewall attachment on the anchor's network interface.
 
-Then **the phone-dispatched run** (GitHub Mobile → `provision.yml`
-`mode=apply` → device-flow approval on the phone) opens its own /32
+Then **the dispatched run** ([`provision.yml`](.github/workflows/provision.yml)
+`mode=apply` → device-flow approval) opens its own /32
 window and provisions the anchor: installs `tang`, prints its
 **thumbprint**, and installs Docker + the **Gatus** availability
 monitor — config-as-file, no admin account, no UI bootstrap. The script
@@ -46,9 +46,9 @@ The module provisions **no SSH access** — inbound or outbound. You administer
 the anchor from the netcup SCP remote console, or by adding your own SSH key
 via netcup SCP at order time.
 
-## The flow, for a first-time user (phone-first)
+## The flow, for a first-time user
 
-Every step below is tappable from a phone; laptop = alias, not assumption.
+Every step below runs from any browser — laptop or phone; phone browsers work for the whole flow, including the approval tap.
 
 1. **Order the anchor** — in the netcup SCP: a small VPS ("piko" class is
    plenty), any Debian-family image, root password by email. Anchor IPv4
@@ -61,9 +61,9 @@ Every step below is tappable from a phone; laptop = alias, not assumption.
    every run authenticates via your per-run approval. Public default once
    secrets land (values stay write-only, log-masked, invisible to forks).
    *(docs/usage.md §2)*
-3. **Dispatch + approve from your phone** — GitHub Mobile →
-   `provision.yml` `mode=apply` (only `server_alias` in the inputs) →
-   approve the device-flow URL + code at netcup's own Keycloak. The
+3. **Dispatch + approve** — Actions → [`provision.yml`](.github/workflows/provision.yml)
+   `mode=apply` (only `server_alias` in the inputs) →
+   approve the device-flow URL + code at netcup's own Keycloak, from any browser. The
    ephemeral token dies with the runner. *(docs/usage.md §3)*
 4. **A1 provisions** — the run opens its own /32 window, installs `tang`,
    prints its **thumbprint** (to ntfy + run artifact + committed
@@ -94,8 +94,9 @@ Every step below is tappable from a phone; laptop = alias, not assumption.
 #    Debian-family OS, note the server name and its id. Anchor IPv4 required.
 # 1. "Use this template" on GitHub, set the identifier repo secrets
 #    (hostname, IPs, scp_user_id, customer number) — no netcup tokens stored.
-# 2. From GitHub Mobile: dispatch provision.yml mode=apply (server_alias only),
-#    approve the device-flow code at netcup's Keycloak on the phone.
+# 2. Dispatch the provision.yml workflow (Actions tab, mode=apply,
+#    server_alias only) from any browser, and approve the device-flow
+#    code at netcup's Keycloak.
 # 3. Save the tang thumbprint (ntfy + run artifact + committed break-glass
 #    file) in your password manager NOW.
 ```

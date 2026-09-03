@@ -1,10 +1,10 @@
-# Usage — phone-first walkthrough
+# Usage — end-to-end walkthrough
 
 From zero to an unattended-booting encrypted main box, runnable END-TO-END
-from a phone. Laptop = alias, not assumption. Time: ~30 minutes, mostly
+from any browser — laptop or phone. Time: ~30 minutes, mostly
 netcup web UI + taps.
 
-Flow: order piko → repo from template → GitHub Mobile dispatch → on-phone
+Flow: order piko → repo from template → workflow dispatch →
 device-flow approval → A1 provisions → thumbprint via ntfy + artifact +
 committed file → clevis bind → monthly one-tap check.
 
@@ -14,14 +14,14 @@ Related: [dr.md](dr.md) (DR table, decision tree, day-1 checklist) ·
 ## 0. What you need
 
 - A netcup account (identity verification happens at order time).
-- A phone with GitHub Mobile + a password manager (PM).
+- A browser (laptop or phone) + a password manager (PM).
 - Your main box: any Debian-family machine with a LUKS-encrypted root.
 - Your main box's public IPv4 — the only address allowed to reach tang.
   Anchor IPv4 is REQUIRED (runners have no IPv6); v6-only is unsupported.
 
 ## 1. Order the anchor ("piko"-class VPS)
 
-In the netcup SCP (iOS app or mobile site, TOTP 2FA), order a small VPS (a
+In the netcup SCP (web UI, TOTP 2FA), order a small VPS (a
 1 vCore / 1 GB "piko", ~€1.90/mo VAT-incl, 12-mo term, is plenty for tang +
 Gatus), official Debian-family image, root password by email. Note:
 
@@ -46,15 +46,15 @@ reviewer identity exists. The approval card shows the exact commit
 UNCHANGED/CHANGED banner). The repo is authoritative for execution; any UI
 is advisory display only.
 
-## 3. Dispatch from your phone, approve on your phone (S1)
+## 3. Dispatch and approve (S1)
 
-GitHub Mobile → Actions → `provision.yml` → `mode=apply`. The ONLY
+Actions → [`provision.yml`](../.github/workflows/provision.yml) → `mode=apply`, from any browser. The ONLY
 identifier in the dispatch inputs is `server_alias`; everything sensitive
 resolves from repo secrets inside the run.
 
 The run prints a netcup device-flow URL + `XXXX-XXXX` user code (and sends
-them via ntfy). You approve at netcup's own Keycloak on the phone (your
-session, your 2FA, ~600s window). The runner polls, receives an ephemeral
+them via ntfy). You approve at netcup's own Keycloak (your
+session, your 2FA, ~600s window) — the approval is one tap, phone browsers included. The runner polls, receives an ephemeral
 token, provisions, and the token dies with the runner. Only the URL + code
 (+ alias) are ever printed — `curl -sS`, no `-v`, no `TF_LOG`, device
 secret masked first. The card carries, verbatim: "we will never email or message you a code to re-confirm." If the device grant is ever disabled:
@@ -104,7 +104,7 @@ availability, never the security anchor.
 
 ## 6. Monthly one-tap `mode=check` (hygiene, not load-bearing)
 
-One dispatch from your phone: drift report + orphan list +
+One dispatch: drift report + orphan list +
 retention-setting warning + versions-behind notice. Under S1 there is
 nothing to keep alive (no stored tokens) — missed months degrade
 visibility, never availability.

@@ -44,7 +44,7 @@ inspection of the module surface.
 ## S1 — every netcup use human-approved per run
 
 > No stored tokens, no crons. Each run authenticates via the tenant's
-> per-run device-flow approval on their phone; the ephemeral token dies
+> per-run device-flow approval from any browser; the ephemeral token dies
 > with the runner (TF 1.11 ephemeral values, never state).
 
 **Rationale.** A standing credential in repo secrets is an account-wide
