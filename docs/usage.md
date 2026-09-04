@@ -44,7 +44,7 @@ tofu apply \
   -var server_name="SCPI-1234567" \
   -var allow_main_box_ipv4="203.0.113.10" \
   -var allow_main_box_ipv6="2001:db8::10" \
-  -var hostname="tang-anchor-01" \
+  -var hostname="anchor-pier-01" \
   -var scp_user_id=1234
 ```
 
@@ -61,7 +61,7 @@ is provisioned anywhere — administration of the anchor is user-direct: the
 SCP console, or your own SSH key added via netcup SCP at order time.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/010-provision.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-anchor/main/scripts/010-provision.sh | bash
 ```
 
 (Or paste the script into the console. It is idempotent — safe to re-run.)
@@ -101,7 +101,7 @@ On your **main box**:
 ```bash
 apt-get install clevis clevis-luks clevis-initramfs
 # find your LUKS device: lsblk -f
-clevis luks bind -d <device> tang '{"url":"http://<anchor-ip>"}'
+clevis luks bind -d <device> tang '{"url":"http://anchor-pier-01.piercloud.net"}'
 ```
 
 **Verify the thumbprint** shown at bind time against the value you saved in

@@ -1,4 +1,4 @@
-# terraform-piercloud-tang
+# terraform-piercloud-anchor
 
 One-click **tang/clevis NBDE anchor** for your server: an OpenTofu module that
 turns a small always-on VPS (netcup) into a network-bound disk-unlock server,
@@ -85,12 +85,12 @@ export NETCUP_CUSTOMER_NUMBER="..."    # or pass var.customer_number
 tofu init
 tofu apply -var server_name="SCPI-123456" \
            -var allow_main_box_ipv4="203.0.113.10" \
-           -var hostname="tang-anchor-01" \
+           -var hostname="anchor-pier-01" \
            -var scp_user_id=1234
 
 # 3. Open the netcup SCP -> your server -> remote console (browser VNC),
 #    log in as root, then run the provisioning script:
-curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-tang/main/scripts/010-provision.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cad0p/terraform-piercloud-anchor/main/scripts/010-provision.sh | bash
 
 # 4. Save the printed tang thumbprint in your password manager NOW.
 ```
@@ -103,7 +103,7 @@ reboot test): [docs/usage.md](docs/usage.md).
 1. **Save the thumbprint** in your password manager when the script prints it.
    You will verify it when binding your main box.
 2. **Wire your main box**: install `clevis clevis-luks clevis-initramfs`, run
-   the printed `clevis luks bind -d <device> tang '{"url":"http://<anchor-ip>"}'`
+   the printed `clevis luks bind -d <device> tang '{"url":"http://anchor-pier-01.piercloud.net"}'`
    — confirming the thumbprint matches what you saved — then
    `update-initramfs -u` and test a reboot.
 3. **Keep the passphrase keyslot.** The tang anchor is convenience and
@@ -139,9 +139,9 @@ Releases are tagged `vX.Y.Z` (with curated GitHub releases; automatic
 prereleases on `main`). Pin the module in your root module like:
 
 ```hcl
-source = "cad0p/tang/piercloud"
+source = "cad0p/anchor/piercloud"
 # or from GitHub directly:
-source = "github.com/cad0p/terraform-piercloud-tang?ref=v0.1.0"
+source = "github.com/cad0p/terraform-piercloud-anchor?ref=v0.1.0"
 ```
 
 During the 0.x series, floating references `?ref=v0` and `?ref=v0.0` exist and
