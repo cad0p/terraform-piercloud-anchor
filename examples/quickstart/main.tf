@@ -26,7 +26,7 @@ module "tang_anchor" {
   server_id           = 1234567        # or server_name = "SCPI-1234567"
   allow_main_box_ipv4 = "203.0.113.10" # your main box's IPv4
   allow_main_box_ipv6 = null           # optional: your main box's IPv6
-  hostname            = "tang-anchor-01"
+  hostname            = "anchor-pier-01"
   scp_user_id         = 1234 # SCP user id owning the firewall policy
 }
 

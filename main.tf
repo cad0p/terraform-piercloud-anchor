@@ -35,8 +35,8 @@ resource "netcup_scp_user_firewall_policy" "tang" {
   count = var.scp_user_id != null ? 1 : 0
 
   user_id     = var.scp_user_id
-  name        = "piercloud-tang-${var.hostname}"
-  description = "tang (TCP/80) from the main box only; egress open. Managed by terraform-piercloud-tang."
+  name        = "piercloud-anchor-${var.hostname}"
+  description = "tang (TCP/80) from the main box only; egress open. Managed by terraform-piercloud-anchor."
 
   rules = concat(
     [
